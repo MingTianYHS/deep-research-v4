@@ -1,0 +1,9 @@
+# deep-research 脚本工具链依赖说明
+#
+# 运行 scripts/ 下的全部脚本：仅需 Python 3.9+ 标准库，无需 pip 安装任何包。
+# 兼容 Windows 中文路径；所有文件读写均显式使用 UTF-8。
+#
+# 开发与测试（仅运行 tests/ 时需要）：
+#   pytest
+#   安装：python -m pip install pytest
+#   建议在技能目录下创建独立虚拟环境：python -m venv .venv

@@ -1,62 +1,77 @@
 ---
 name: deep-research
-description: "深度研究技能：面向需要多源检索、交叉验证和带引用长篇报告的复杂问题，覆盖行业分析、技术趋势调研、竞品对比与学术级研究报告。当用户要求深度研究、调研某个行业或主题、比较多个对象、核查事实，或撰写带参考文献的报告时使用。流程为必要澄清（最多3问）、研究规划、并行子代理检索、综合撰写报告，产物保存到当前工作目录。"
+description: "深度研究技能：以证据链为核心的多源检索、交叉验证与中文研究报告生成。适用于行业分析、技术趋势、竞品对比、选型决策、事实核查等需要引用与可追溯证据的复杂问题。流程为：必要澄清（最多3问）→ 判定查询形态与验证强度 → 研究计划落盘 → 并行子代理检索 → 证据入库与三角验证 → 综合撰写 → 质量校验；产物为中文 run 目录（研究报告、来源、证据、论点、运行清单）。"
+metadata:
+  version: "4.0.0"
 ---
 
-# Deep Research（深度研究）
+# 深度研究（Deep Research）
 
-本技能把「研究负责人」方法论固化为可执行流程：先澄清范围，再制定研究计划，派发并行子代理检索，最后综合为带引用的研究报告。
+本技能把「研究负责人」方法论固化为可执行流程：先澄清范围，再按查询形态与验证强度制定计划，派发并行子代理检索，把来源、证据、论点写入 run 目录，最后综合为带引用的中文研究报告。
 
 ## 何时使用
 
-当用户明确要求「深度研究」「深度调研」「行业分析」「技术趋势」「竞品对比」「学术级报告」「带引用的报告」，或问题本身需要跨多个来源收集、比较、验证并综合成较长报告时使用。
+- 用户要求「深度研究」「深度调研」「行业分析」「技术趋势」「竞品对比」「选型」「事实核查」「带引用的报告」。
+- 问题需要跨多个来源收集、比较、验证并综合成长报告。
+- 需要保留可审计证据链（来源、原文、论点对应关系）的研究任务。
 
-以下情况不要使用：基础寒暄；一句话即可回答的常识问题；无需外部检索的简单计算或改写任务。
+不适用：基础寒暄、简单常识、无需检索的计算/改写/排版、纯调试。
 
-## 核心流程
+## 核心原则
 
-### 阶段一：必要澄清（最多 3 问）
+1. **证据链**：来源 → 证据 → 论点 → 报告，每一环可回溯；禁止编造 URL、数字、日期或引文。
+2. **计划先行**：检索开始前，研究计划必须落盘为 run 目录下的 `研究计划.md`。
+3. **中文优先**：报告用简体中文；产出目录与文件名一律中文。
+4. **事实与推测分开**：A 类硬事实必须有证据；C 类分析可追溯到事实；D 类推测必须标注。
+5. **并行但不放羊**：子代理任务互不重叠、自包含、输出格式明确。
 
-研究开始前，仅当用户问题存在真正影响研究方向的歧义时，用 `ask_user_question` 提问，最多 3 个，问题要短且可几个词回答。若问题已足够具体，直接进入规划，不要为了提问而提问。用户回答后立即开始研究，不再追问。
+## 研究路径：两个维度
 
-### 阶段二：规划 → 并行检索 → 综合写作
+- **查询形态（自动判定）**：直接型（单事实/定义，一处权威来源即可）、深度优先（同一问题多视角深挖）、广度优先（拆成多个独立子问题）。
+- **验证强度（默认 standard）**：standard 跑完整流程与三角验证；deep 增加提纲动态重构、批判回环、多角色红队与更大来源预算。
 
-开始前先用 `read` 读取本技能目录下的 `references/lead-playbook.md`（完整流程规则），再按以下步骤执行。
+| 路径 | 组合 | 适用场景 | 子代理 | 来源预算 |
+|---|---|---|---|---|
+| 直查 | 直接型 × standard | 单事实、定义、简单核对 | 1 个 | 3–5 |
+| 标准研究 | 深度/广度 × standard | 大多数研究请求 | 3 个 | 10–15 |
+| 深研 | 深度/广度 × deep | 关键决策、争议大、对比选型、尽调 | 3–5 个 | 20–30 |
 
-1. **判定查询类型**：深度优先（同一问题多视角深挖）、广度优先（拆成多个独立子问题）、直接型（单次集中调查即可）。类型决定子代理分工与报告篇幅。
-2. **保存研究计划**：用 `write` 将计划写入当前工作目录的 `research_plan_<topic_slug>.md`，内容包括查询类型判定、子任务拆分与边界、每个子代理的目标与预期产出、微信公众号检索安排（是否适用；若适用写关键词与时间范围）、以及如何综合各路线发现。
-3. **并行派发子代理**：用 `subagent` 派发。简单问题 1 个，标准问题 3 个，复杂问题最多 5 个。多个 `subagent` 调用放在同一条消息中并行发起。`subagent` 是异步的，调用后返回子代理 id，完成时会有通知；等待期间可整理已有材料，不要重复派发。
-4. **自包含任务简报**：子代理看不到父对话，每个 `prompt` 必须自带背景、目标、边界、输出格式、可用工具和来源要求；直接套用 `references/expert-brief.md` 的模板并替换 `{TASK}`。
-5. **综合与补齐**：收到结果后核对关键数字、日期与来源，标记冲突与不确定性；发现缺口时再派少量子代理补齐。边际收益递减时立即停止检索。
-6. **撰写并保存报告**：按 `references/report-template.md` 的结构写作，用 `write` 保存为当前工作目录的 `research_report_<topic_slug>.md`，并在回复中给出文件路径和简要摘要。
+`ultradeep` 仅作为深研的 `budget=extended` 参数，不是独立档位。用户说「快速查一下」走直查；说「深度研究/彻底调研」走深研。满足以下任一条件升级 deep：关键决策/采购/选型/投资；证据冲突明显；涉及监管、医疗、法律或高风险；用户要求「彻底/穷尽/尽调」；预计超过 5 个子问题或报告超过 5000 字。
+
+## 执行流程
+
+1. **必要澄清**：仅当存在影响研究方向的歧义时，用 `ask_user_question` 提问，最多 3 个，问题要短、可几个词回答；信息足够时直接开始。
+2. **读手册**：开始前读 `references/lead-playbook.md`；写子代理任务时读 `references/expert-brief.md`；动笔前读 `references/report-template.md`；交付前读 `references/quality-gates.md`。
+3. **初始化 run 目录**：在 `pwsh` 中运行 `python scripts/citation_manager.py init-run --query "研究问题" --mode standard`。若 `python` 不在 PATH，用 `& "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" scripts\citation_manager.py init-run --query "研究问题" --mode standard`。记下输出的 `dir`。
+4. **写研究计划**：用 `write` 保存为 run 目录下的 `研究计划.md`，内容包括查询形态与验证强度、子任务拆分与边界、每个子代理的目标与预期产出、微信公众号检索安排（是否适用、关键词与时间范围）、综合方式。
+5. **并行派发子代理**：用 `subagent`，直查 1 个、标准 3 个、复杂最多 5 个；多个调用放在同一条消息。每个 prompt 按 `references/expert-brief.md` 写，要求返回结构化证据记录（claim、evidence_quote、source_url、source_title、confidence）。
+6. **证据入库与三角验证**：每批检索完成后用 `citation_manager.py register-source` 登记来源、用 `evidence_store.py add` 写入原文证据；核对关键数字、日期与来源，冲突记录取舍，缺口少量补派，边际收益递减时停止。
+7. **综合撰写**：按 `references/report-template.md` 写中文报告，保存为 run 目录下的 `研究报告.md`；正文以段落为主，少用项目符号，只有明确需要列表/排名或结构化对比时才用表格。
+8. **校验与交付**：依次运行 `extract_claims.py`、`citation_manager.py link-claims`、`verify_claim_support.py`、`validate_report.py`、`verify_citations.py`；适用时运行 `validate_decision_guide.py`、`validate_open_source_solutions.py`。失败按 `references/quality-gates.md` 修复，最多 3 轮。需要 HTML 时读 `references/html-generation.md` 并用 `md_to_html.py` 生成 `报告.html`。最终回复给出 run 目录、报告路径、摘要与局限。
 
 ## DSH 工具映射
 
 | 用途 | 工具 | 要点 |
-| --- | --- | --- |
-| 向用户澄清 | `ask_user_question` | 最多 3 问，必须用工具 |
-| 加载配套技能 | `skill` | 中文检索优先加载 `wechat-article-search` |
-| 派发研究子代理 | `subagent`（Agent Teams 场景用 `spawn_teammate`） | 异步、自包含 prompt、同消息并行 |
-| 读取计划/参考 | `read` | 按需读取 references |
-| 写计划/报告 | `write` / `edit` | 只写当前工作目录 |
-| 网页搜索/抓取 | `web_search` / `web_fetch` | 搜索后用 web_fetch 读全文 |
-| 运行脚本/校验 | `pwsh` | 如微信公众号检索脚本 |
+|---|---|---|
+| 澄清 | `ask_user_question` | 最多 3 问 |
+| 加载配套技能 | `skill` | 中文检索优先 `wechat-article-search` |
+| 派发子代理 | `subagent`（Agent Teams 用 `spawn_teammate`） | 异步、自包含、同消息并行 |
+| 读写文件 | `read` / `write` / `edit` | 只写当前工作目录 |
+| 搜索/抓取 | `web_search` / `web_fetch` | 搜索后抓全文 |
+| 跑脚本/校验 | `pwsh` | 用 DSH 自带 Python；中文路径加引号 |
 
-DSH 没有额外的内部办公、邮件、日程、即时通讯或任务管理集成工具，不要假设或编造此类工具。当前日期以运行时上下文为准，使用当前工作目录，最终产出中不要保留未替换的模板占位符或产物标记；`expert-brief` 的 `{TASK}` 必须替换为具体任务。若当前会话启用了 Agent Teams 且没有 `subagent` 工具，用 `spawn_teammate` 派发同类任务，并按 `references/expert-brief.md` 写初始任务；共享任务板用于跟踪进度。`wechat-article-search` 的检索结果为尽力而为（可能触发反爬或结果不足），失败时改用 `web_search` 与 `web_fetch` 补充，不要卡住。
+DSH 没有额外的内部办公、邮件、日程、即时通讯或任务管理集成工具，不要假设或编造。
 
 ## 关键质量门槛
 
-- **计划先行**：开始检索前，研究计划必须已落盘。
-- **来源真实**：只引用真实访问过的 URL，禁止编造或补全链接，不编造数字与事实；关键事实要有来源，数字、日期、名称要具体。
-- **区分事实与推测**：对预测性内容、营销话术、聚合二手来源保持警惕；冲突信息要说明取舍，并注明研究局限。
-- **写作风格**：默认小标题加段落，少用项目符号；只有用户明确要求列表/排名，或结构化对比表确有必要时才用列表或表格；禁止 emoji。
-- **篇幅匹配**：直接型 500 至 1000 字，深度优先 1500 至 3000 字，广度优先 2000 至 4000 字。
-- **引用可点击**：References 为编号列表，每条使用 `[标题](URL)`。
+- 计划未落盘不得开始检索；引用来源必须真实访问过，禁止编造链接。
+- A 类硬事实（数字、日期、价格、法规、规格、直接引语）必须有 `证据.jsonl` 记录；无证据不得交付。
+- 每条主要结论至少 2 个独立来源簇（标准）/ 3 个（深研）；同一通稿的转载算一个簇。
+- 报告默认中文、禁止 emoji；References 用编号列表 `[标题](URL)`。
+- 产出文件名必须是中文：`研究报告.md`、`研究计划.md`、`来源.jsonl`、`证据.jsonl`、`论点.jsonl`、`运行清单.json`。
 
-## 参考文件（按需加载）
+## 参考文件与脚本
 
-- `references/lead-playbook.md`：完整研究负责人流程与规则。开始规划前必读，包含澄清规则、查询类型判定、计划要求、子代理数量与任务分配、报告规范。文件较长，若 `read` 结果因上下文压缩被裁剪，按 `offset`/`limit` 分段读取。
-- `references/expert-brief.md`：子代理任务简报模板。每次用 `subagent` 派发任务时使用，把 `{TASK}` 替换为具体任务。
-- `references/report-template.md`：报告结构模板与字数区间。撰写最终报告前必读。
-
-以上路径相对于本技能目录（即 `skill` 工具返回的 Base directory）。
+- 必读：`references/lead-playbook.md`（执行手册）、`references/expert-brief.md`（子代理简报）、`references/report-template.md`（报告模板）、`references/quality-gates.md`（证据门槛）。
+- 按需：`references/evidence-chain.md`、`references/methodology.md`、`references/report-assembly.md`、`references/html-generation.md`、`references/decision-guides.md`、`references/open-source-solutions.md`、`references/continuation.md`。
+- 脚本位于 `scripts/`（相对于技能根目录），核心只依赖 Python 3.9+ 标准库；命令与数据契约见 `references/evidence-chain.md` 和 `README.md`。PowerShell 下 JSON 参数用 `--json-file`。若 `python` 不在 PATH，统一用 DSH 自带 Python 的绝对路径。

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Source",
+  "description": "研究来源及其稳定身份。source_id = sha256(canonical_locator)[:16]。",
+  "type": "object",
+  "required": ["source_id", "canonical_locator", "raw_url", "title", "source_type", "metadata_status", "registered_at"],
+  "properties": {
+    "source_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "sha256(canonical_locator)[:16]，跨编辑与续写保持稳定"
+    },
+    "canonical_locator": {
+      "type": "string",
+      "description": "规范标识：doi:10.1038/...、arxiv:2305.14251，或规范化 URL（scheme+host+path，不含 fragment 与追踪参数）"
+    },
+    "raw_url": {
+      "type": "string",
+      "description": "采集时的原始 URL"
+    },
+    "title": {
+      "type": "string",
+      "description": "来源标题"
+    },
+    "authors": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "default": null,
+      "description": "作者列表"
+    },
+    "year": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "出版年份"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["web", "academic", "documentation", "code", "news", "government", "book", "official", "industry", "other"],
+      "description": "来源类型"
+    },
+    "metadata_status": {
+      "type": "string",
+      "enum": ["unverified", "doi_verified", "url_verified", "title_matched", "verified", "conflicted"],
+      "description": "元数据核验程度"
+    },
+    "registered_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "来源登记时间（ISO 8601）"
+    }
+  },
+  "additionalProperties": false
+}
