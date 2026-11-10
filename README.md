@@ -48,6 +48,17 @@ C:\Users\Daybreak\.agents\skills\deep-research\
 - 基线：当前 DSH 版 `deep-research` 的「研究负责人」流程 + 备份版 `deep-research` v2.9.0 的工程化工具链
 - 许可证：MIT
 
+## Git 回滚
+
+本目录是独立 Git 仓库。`main` 分支保存升级前基线，`merge-deep-research` 分支保存融合版；发布标签为 `v4.0.0`。
+
+```powershell
+git log --oneline --decorate
+git switch main                    # 查看/回到升级前基线
+git reset --hard baseline-before-merge   # 完全回到基线
+git switch merge-deep-research     # 回到融合版
+```
+
 ## 核心特性
 
 - **两维研究路径**：查询形态（直接型 / 深度优先 / 广度优先）× 验证强度（标准 / 深研），不再使用四档模式。
