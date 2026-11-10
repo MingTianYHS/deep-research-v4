@@ -24,6 +24,8 @@ C:\Users\Daybreak\.agents\skills\deep-research\
 │  ├─ open-source-solutions.md
 │  └─ continuation.md
 ├─ scripts\
+│  ├─ _console.py
+│  ├─ _json_input.py
 │  ├─ citation_manager.py
 │  ├─ evidence_store.py
 │  ├─ extract_claims.py

@@ -11,6 +11,8 @@
 - 新增 `references/evidence-chain.md`：来源、证据、论点、运行清单的数据契约与 CLI 操作示例。
 - 新增中文报告模板与中文产物命名：`研究报告.md`、`研究计划.md`、`来源.jsonl`、`证据.jsonl`、`论点.jsonl`、`运行清单.json`、`开源方案.jsonl`、`报告.html`。
 - 新增中文测试 fixture 与中文论点支撑用例。
+- `citation_manager.py` 新增 `link-claims`（把正文引用编号关联到稳定来源 ID）与 `finalize-run`（写入完成时间与关键假设）。
+- 所有接受 JSON 参数的脚本新增 `--json-file`，避免 Windows PowerShell 剥离内层双引号导致 JSON 解析失败。
 
 ### Changed
 
