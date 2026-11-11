@@ -78,6 +78,32 @@ class TableExtractionTests(unittest.TestCase):
         self.assertTrue(any("指标=市场规模" in t and "数值=1200亿美元" in t for t in texts), texts)
 
 
+class TableCitationInheritanceTests(unittest.TestCase):
+    """表格行不带 [N]，应继承本节最近一次引用，避免必然 unsupported。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_table_rows_inherit_section_citation(self):
+        md = (
+            "## 主要发现\n\n"
+            "据公开来源，2026 年该市场规模达到 1200 亿美元，同比增长 30%。[1]\n\n"
+            "| 指标 | 数值 |\n"
+            "|---|---|\n"
+            "| 市场规模 | 1200亿美元 |\n"
+        )
+        p = os.path.join(self.tmp, "r.md")
+        Path(p).write_text(md, encoding="utf-8")
+        r = run_script("extract_claims", "extract", "--report", p, "--dir", self.tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        claims = read_claims(self.tmp)
+        table_claims = [c for c in claims if "=" in c["text"]]
+        self.assertTrue(table_claims, claims)
+        for c in table_claims:
+            self.assertEqual(c["_citation_numbers"], [1], c["text"])
+
+
 class WordCountTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()

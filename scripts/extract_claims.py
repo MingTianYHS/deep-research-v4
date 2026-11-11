@@ -419,26 +419,35 @@ def cmd_extract(args: argparse.Namespace) -> None:
     added = 0
     skipped = 0
     current_ids = set()
+    # 表格行本身通常不带 [N] 标记，需要继承上文最近一次引用编号，
+    # 否则表内量化事实会被判「无引用」而必然 unsupported。
+    inherited_citations: list[int] = []
 
     skip_sections = {'preamble', 'bibliography', 'methodology'}
     for section_id, content in sections:
         if section_id in skip_sections:
             continue
+        inherited_citations = []
         sentences = extract_sentences(content)
         for sentence in sentences:
             claim_id = compute_claim_id(section_id, sentence)
             current_ids.add(claim_id)
-            if claim_id in existing_ids:
-                skipped += 1
-                continue
 
             # 抽取句子中的引用编号
             citation_nums = []
             for m in CITATION_RE.finditer(sentence):
                 nums = [int(n.strip()) for n in m.group(1).split(',')]
                 citation_nums.extend(nums)
+            if citation_nums:
+                inherited_citations = list(citation_nums)
+
+            if claim_id in existing_ids:
+                skipped += 1
+                continue
 
             claim_type = classify_claim(sentence, section_id)
+            # 表格行无自有引用时，继承本节最近一次引用编号
+            row_citations = citation_nums or list(inherited_citations)
             claim = {
                 'claim_id': claim_id,
                 'section_id': section_id,
@@ -449,7 +458,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
                 'evidence_ids': [],  # 由 verify_claim_support 回填命中的证据 ID
                 'support_status': 'unverified',
                 'extracted_at': datetime.now(timezone.utc).isoformat(),
-                '_citation_numbers': citation_nums,  # 临时字段，供链接步骤使用
+                '_citation_numbers': row_citations,  # 临时字段，供链接步骤使用
             }
             append_jsonl(claims_path, claim)
             existing_ids.add(claim_id)

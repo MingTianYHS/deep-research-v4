@@ -2,6 +2,17 @@
 
 本技能的所有重要变更记录在此。格式参考 Keep a Changelog，版本遵循 SemVer。
 
+## [4.4.1] - 2026-11-11
+
+### Fixed
+
+- **表格论点继承本节引用编号**：v4.3.0 的表格结构化解析让表格数据行成为独立论点，但表格行通常不带 `[N]` 标记，导致表内量化事实被判「无引用」而必然 `unsupported`，`--strict` 永远失败。现在表格行会继承本节最近一次出现的引用编号，既能被证据链核对，又不会误挡。
+- 端到端验收（`init-run → register-source → evidence_store add → extract → link-claims → verify --strict → validate → md_to_html → verify_html → finalize-run`）11 步全部通过。
+
+### Tests
+
+- 新增表格引用继承回归用例；全套 144 个用例通过。
+
 ## [4.4.0] - 2026-11-11
 
 ### Fixed（复审收尾）
