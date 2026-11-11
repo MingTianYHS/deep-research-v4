@@ -49,16 +49,25 @@
 
 ## Git 回滚
 
-本目录是独立 Git 仓库。`main` 分支保存升级前基线，`merge-deep-research` 分支保存融合版；发布标签为 `v4.0.0`。
+本目录是独立 Git 仓库。
+
+| 分支 / 标签 | 内容 |
+| --- | --- |
+| `main` | 升级前基线（只读参考，不要在这里改） |
+| `merge-deep-research` | **当前开发分支，v4.4.0 在这里** |
+| `fix-quality-gate` | 质量门修复过程分支（已并入 `merge-deep-research`） |
+| 标签 `v4.0.0` | 融合版首版 |
+| 标签 `v4.4.0` | 质量门修复完成版（当前） |
+| 标签 `baseline-before-merge` | 融合前基线快照 |
 
 ```powershell
 git log --oneline --decorate
-git switch main                    # 查看/回到升级前基线
-git switch --detach baseline-before-merge   # 只读查看该基线（推荐）
-git switch merge-deep-research     # 回到融合版
+git switch merge-deep-research                  # 当前版本（推荐）
+git switch --detach v4.4.0                      # 只读查看 v4.4.0
+git switch --detach baseline-before-merge       # 只读查看融合前基线
 ```
 
-> `git reset --hard baseline-before-merge` 会**丢弃工作区所有未提交修改**。执行前先 `git status` 确认并备份；需要保留本地改动时用 `git reset --keep`。
+> 回滚到旧版本前先 `git status` 确认没有未提交修改并备份；`git reset --hard` 会丢弃工作区改动，需要保留时用 `git reset --keep`。
 
 ## 核心特性
 
@@ -66,8 +75,8 @@ git switch merge-deep-research     # 回到融合版
 - **证据链落盘**：`来源.jsonl` → `证据.jsonl` → `论点.jsonl` → `研究报告.md`，可审计、可续写。
 - **中文优先**：报告、run 目录、产物文件名全部中文。
 - **并行子代理**：标准 3 个、复杂最多 5 个，自包含任务简报。
-- **自动校验**：结构、引用、来源、论点支撑、决策指南、开源方案。
-- **HTML 报告**：Markdown 转 McKinsey 风格自包含 HTML。
+- **自动校验**：结构、引用、来源、论点支撑、决策指南、开源方案。校验语义为「硬门 + 软提示」——确定性检查（产物完整性、幽灵来源、A 类硬事实零重叠）直接失败，模糊不确定项进入 `advisory` 清单供人工复核。
+- **HTML 报告**：Markdown 转 McKinsey 风格自包含 HTML；**正文 `[N]` 引用可点击**，点一下直接打开来源页面。
 - **无图表 / 无 PDF**：本版本不包含富媒体与 PDF 生成链路。
 
 ## 使用示例
