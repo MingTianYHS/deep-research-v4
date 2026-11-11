@@ -225,7 +225,7 @@ def cmd_init_run(args: argparse.Namespace) -> None:
     query_type = args.query_type or ('direct' if args.mode == 'direct' else 'depth')
 
     manifest = {
-        'version': '4.2.0',
+        'version': '4.3.0',
         'query': args.query or '',
         'query_type': query_type,
         'rigor': rigor,

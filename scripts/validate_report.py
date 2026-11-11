@@ -351,8 +351,11 @@ class ReportValidator:
         return True
 
     def _check_word_count(self) -> bool:
-        """Check overall report length（低于档位硬下限即 error）"""
-        word_count = self._count_words(self.content)
+        """Check overall report length（只统计正文，低于档位硬下限即 error）"""
+        # 只算正文：参考文献、URL 不算字数，避免空壳报告靠堆链接达标
+        body = self._body_without_bibliography()
+        body = re.sub(r'https?://\S+', '', body)
+        word_count = self._count_words(body)
         minimum = MIN_WORDS[self.profile]
 
         if word_count < minimum:

@@ -295,31 +295,79 @@ def split_sentences(line: str) -> list[str]:
     return merged_sentences
 
 
+# 表格分隔行：|---|---|、--- | ---、| :--- | ---: |
+_TABLE_SEP_RE = re.compile(
+    r'^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$'
+)
+
+
+def _split_table_row(line: str) -> list[str]:
+    """拆分表格行为单元格；兼容有/无首尾管道。"""
+    s = line.strip()
+    if s.startswith('|'):
+        s = s[1:]
+    if s.endswith('|'):
+        s = s[:-1]
+    return [cell.strip() for cell in s.split('|')]
+
+
+def _table_row_claim(header: list[str], row: list[str]) -> str:
+    """把一行数据按表头映射成一条可读论点。
+
+    跳过空的表头/单元格；纯序号列（表头为空或「序号/编号」）不参与。
+    只有包含数字的行才作为硬事实候选。
+    """
+    pairs: list[str] = []
+    for idx, cell in enumerate(row):
+        cell = cell.strip()
+        if not cell:
+            continue
+        head = header[idx].strip() if idx < len(header) else ''
+        if head in ('序号', '编号', '#', 'No', 'No.'):
+            continue
+        pairs.append(f'{head}={cell}' if head else cell)
+    text = '；'.join(pairs)
+    return text if text and re.search(r'\d', text) else ''
+
+
 def extract_sentences(text: str) -> list[str]:
-    """把章节正文切成句子，过滤 Markdown 噪声与过短碎片。"""
+    """把章节正文切成句子，过滤 Markdown 噪声与过短碎片。
+
+    表格按「表头 + 分隔行 + 数据行」结构解析：
+    - 表头行与分隔行不再被当成论点；
+    - 数据行按「表头=值」拼成一条，保留数字但去掉纯序号列；
+    - 兼容无首尾管道的表格。
+    """
     # 去掉粗体/斜体标记
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
     text = re.sub(r'\*([^*]+)\*', r'\1', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)
 
-    result = []
-    for raw_line in text.split('\n'):
-        line = raw_line.strip()
-        if not line:
+    lines = text.split('\n')
+    result: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        raw = lines[index].strip()
+
+        # 表格块：当前行含 |，下一行是分隔行
+        if '|' in raw and index + 1 < len(lines) and _TABLE_SEP_RE.match(lines[index + 1]):
+            header = _split_table_row(raw)
+            index += 2
+            while index < len(lines):
+                row_line = lines[index].strip()
+                if not row_line or '|' not in row_line:
+                    break
+                claim = _table_row_claim(header, _split_table_row(row_line))
+                if claim and _visible_length(claim) >= 4:
+                    result.append(claim)
+                index += 1
             continue
-        if line.startswith('#'):
+
+        index += 1
+        line = raw
+        if not line or line.startswith('#'):
             continue
-        from_table = False
-        if line.startswith('|'):
-            # 表格分隔行（|---|---|）跳过
-            if re.fullmatch(r'[\s|:\-]+', line):
-                continue
-            # 表格单元格拼成一句，保留表内 A 类量化事实（不再整表跳过）
-            cells = [c.strip() for c in line.strip('|').split('|') if c.strip()]
-            line = '，'.join(cells)
-            if not re.search(r'\d', line):
-                continue  # 无数字的表头/描述行不作为硬事实候选
-            from_table = True
         if re.fullmatch(r'[-*_]{3,}', line):
             continue
         # 去掉无序/有序列表标记。
@@ -331,8 +379,6 @@ def extract_sentences(text: str) -> list[str]:
         if not line:
             continue
 
-        # 表格单元格是浓缩事实，碎片阈值放宽；正文仍用 10 过滤噪声
-        min_len = 4 if from_table else 10
         for sentence in split_sentences(line):
             sentence = sentence.strip()
             if not sentence or sentence.startswith('#'):
@@ -346,7 +392,7 @@ def extract_sentences(text: str) -> list[str]:
                 sentence = lead_cite.group(2).strip()
                 if not sentence:
                     continue
-            if _visible_length(sentence) >= min_len:
+            if _visible_length(sentence) >= 10:
                 result.append(sentence)
 
     return result

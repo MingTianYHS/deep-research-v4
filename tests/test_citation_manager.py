@@ -33,7 +33,7 @@ class TestInitRun(unittest.TestCase):
 
             with open(os.path.join(d, '运行清单.json'), encoding='utf-8') as f:
                 manifest = json.load(f)
-            self.assertEqual(manifest['version'], '4.2.0')
+            self.assertEqual(manifest['version'], '4.3.0')
             self.assertEqual(manifest['query'], 'test question')
             self.assertEqual(manifest['mode'], 'deep')
             self.assertEqual(manifest['query_type'], 'depth')
