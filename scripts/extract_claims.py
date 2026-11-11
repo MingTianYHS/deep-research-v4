@@ -175,43 +175,74 @@ def classify_materiality(text: str, claim_type: str, section_id: str = '') -> st
     return 'B'
 
 
-def _h1_patterns() -> list:
-    """当报告只用一级标题（# ）时，把 ## 模式降级为 # 模式复用。"""
+_HEADING_RE = re.compile(r'^(#{1,2})\s+(.+?)\s*$')
+_FENCE_RE = re.compile(r'^\s*(```|~~~)')
+
+
+def _heading_text_patterns() -> list:
+    """把 SECTION_PATTERNS（以 ^## 开头）转成只匹配「标题文本」的模式。"""
     out = []
     for pattern, id_or_fn in SECTION_PATTERNS:
-        src = pattern.pattern.replace(r'^##', r'^#', 1)
+        src = pattern.pattern
+        if src.startswith(r'^##\s*'):
+            src = '^' + src[len(r'^##\s*'):]
+        elif src.startswith('^##'):
+            src = '^' + src[3:]
         out.append((re.compile(src, pattern.flags), id_or_fn))
     return out
+
+
+_TEXT_PATTERNS = _heading_text_patterns()
+
+
+def _section_id_for_heading(text: str, allow_fallback: bool) -> str | None:
+    """把标题文本映射为 section_id；未知标题按需走兜底。"""
+    for pattern, id_or_fn in _TEXT_PATTERNS[:-1]:  # 最后一条是无别名的兜底
+        m = pattern.match(text)
+        if m:
+            return id_or_fn(m) if callable(id_or_fn) else id_or_fn
+    if allow_fallback:
+        return _fallback_section_id(text)
+    return None
 
 
 def parse_sections(markdown: str) -> list[tuple[str, str]]:
     """把 Markdown 解析为 (section_id, content) 列表。
 
-    优先识别二级标题；若全文没有 ## 但存在多个 # 标题，则按一级标题切分，
-    避免「只用 # 的合法报告」被整体当作 preamble 跳过。
+    同时识别 # 与 ## 两级标题（### 及更深保留为正文），因此
+    「# 执行摘要 + # 主要发现 + ## 2.1 小节」这类混合文档不会丢失
+    H1 章节正文；围栏代码块里的 # 不当作标题。
     """
-    has_h2 = re.search(r'^##\s', markdown, re.M) is not None
-    h1_count = len(re.findall(r'^#\s', markdown, re.M))
-    patterns = SECTION_PATTERNS if (has_h2 or h1_count <= 1) else _h1_patterns()
-
     lines = markdown.split('\n')
     sections = []
     current_id = 'preamble'
     current_lines = []
+    in_fence = False
 
     for line in lines:
-        matched = False
-        for pattern, id_or_fn in patterns:
-            m = pattern.match(line)
-            if m:
-                if current_lines:
-                    sections.append((current_id, '\n'.join(current_lines)))
-                current_id = id_or_fn(m) if callable(id_or_fn) else id_or_fn
-                current_lines = []
-                matched = True
-                break
-        if not matched:
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
             current_lines.append(line)
+            continue
+
+        if not in_fence:
+            m = _HEADING_RE.match(line)
+            if m:
+                level = len(m.group(1))
+                heading_text = m.group(2).strip()
+                # 二级未知标题：若已在某个章节内，视为该章节的子标题，
+                # 不另起 section；仅在还没有章节时兜底建节。
+                section_id = _section_id_for_heading(
+                    heading_text, allow_fallback=(level == 2 and current_id == 'preamble')
+                )
+                if section_id:
+                    if current_lines:
+                        sections.append((current_id, '\n'.join(current_lines)))
+                    current_id = section_id
+                    current_lines = []
+                    continue
+
+        current_lines.append(line)
 
     if current_lines:
         sections.append((current_id, '\n'.join(current_lines)))
@@ -291,9 +322,11 @@ def extract_sentences(text: str) -> list[str]:
             from_table = True
         if re.fullmatch(r'[-*_]{3,}', line):
             continue
-        # 去掉无序/有序列表标记
+        # 去掉无序/有序列表标记。
+        # 有序列表要求「1-3 位数字 + 分隔符 + 至少一个空白」，避免把
+        # 「1.5万亿美元」「3.12版本」「2025.5%」的行首小数/版本号当成序号吞掉。
         line = re.sub(r'^[-*+]\s+', '', line)
-        line = re.sub(r'^\d+[.、)）]\s*', '', line)
+        line = re.sub(r'^\d{1,3}[.、)）]\s+', '', line)
         line = line.strip()
         if not line:
             continue
@@ -384,15 +417,25 @@ def cmd_extract(args: argparse.Namespace) -> None:
         }, ensure_ascii=False), file=sys.stderr)
         sys.exit(1)
 
-    #  retire：本次报告未出现的旧论点标记 retired，避免改稿后旧 A 类论点
-    #  永久残留并让 --strict 永远失败。
+    #  retire / revive：
+    #  - 本次报告未出现的旧论点标记 retired，避免改稿后旧 A 类论点永久残留；
+    #  - 本次报告重新出现的 retired 论点恢复为 unverified，避免「改回上一版」
+    #    后所有论点仍是 retired、校验以 verified=0 假通过。
     all_claims = read_jsonl(claims_path)
     retired = 0
+    revived = 0
     for c in all_claims:
-        if c.get('claim_id') not in current_ids and c.get('support_status') != 'retired':
+        cid = c.get('claim_id')
+        if cid in current_ids:
+            if c.get('support_status') == 'retired':
+                c['support_status'] = 'unverified'
+                for key in ('_support_score', '_support_notes', '_hard_fact_missing', '_ghost_sources'):
+                    c.pop(key, None)
+                revived += 1
+        elif c.get('support_status') != 'retired':
             c['support_status'] = 'retired'
             retired += 1
-    if retired:
+    if retired or revived:
         write_jsonl(claims_path, all_claims)
 
     print(json.dumps({
@@ -400,6 +443,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
         'claims_added': added,
         'claims_skipped': skipped,
         'claims_retired': retired,
+        'claims_revived': revived,
         'total_claims': len(existing_ids),
     }, ensure_ascii=False))
 

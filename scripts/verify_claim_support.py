@@ -333,16 +333,17 @@ def cmd_verify(args: argparse.Namespace) -> None:
             claim['_support_score'] = score
             claim['_support_notes'] = notes
 
-            # A 类硬事实确定性硬门：仅当「零词面重叠」且缺年份/百分比时判
-            # unsupported。有部分重叠时保留 partial/needs_review（避免把
-            # 「证据支持但没复述年份」误挡）。
+            # A 类硬事实硬门：与证据零词面重叠即判 unsupported。
+            # 不再要求「同时缺年份/百分比」——价格、规格、事件等事实
+            # 往往不含年份/百分比，旧逻辑会让它们配无关证据也通过。
             if is_hard and score == 0.0:
                 missing_signals = hard_fact_missing_signals(claim['text'], quotes)
+                claim['support_status'] = 'unsupported'
+                claim['_hard_fact_missing'] = missing_signals or ['无词面重叠']
+                claim['_support_notes'] = 'A 类硬事实与证据零重叠'
                 if missing_signals:
-                    claim['support_status'] = 'unsupported'
-                    claim['_hard_fact_missing'] = missing_signals
-                    claim['_support_notes'] = '硬事实信号未在证据出现：' + '、'.join(missing_signals)
-                    hard_conflict_count += 1
+                    claim['_support_notes'] += '；缺失信号：' + '、'.join(missing_signals)
+                hard_conflict_count += 1
 
         # 软提示清单（不阻塞）：needs_review / partial 的事实性论点
         if claim.get('support_status') in ('needs_review', 'partial') and claim_type == 'factual':
@@ -357,6 +358,18 @@ def cmd_verify(args: argparse.Namespace) -> None:
         updated_claims.append(claim)
 
     write_jsonl(claims_path, updated_claims)
+
+    # 完整性硬门：活跃论点为 0（全部 retired 或为空）时没有可校验内容，
+    # 绝不能以 verified=0 判 pass——这是「空即通过」的最后一道口子。
+    active_count = sum(1 for c in updated_claims if c.get('support_status') != 'retired')
+    if active_count == 0:
+        print(json.dumps({
+            'status': 'fail',
+            'error': '活跃论点为 0（全部 retired 或为空）：没有可校验内容，不得判定通过',
+            'verified': 0,
+            'support_status_counts': dict(Counter(c.get('support_status') for c in updated_claims)),
+        }, ensure_ascii=False, indent=2))
+        sys.exit(1)
 
     status_counts = Counter(c.get('support_status') for c in updated_claims)
     factual_unsupported = sum(
@@ -383,6 +396,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
         'status': 'pass' if passed else 'fail',
         'profile': args.profile,
         'verified': verified,
+        'active_claims': active_count,
         'support_status_counts': dict(status_counts),
         'factual_unsupported': factual_unsupported,
         'hard_factual_unsupported': hard_factual_unsupported,

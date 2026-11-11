@@ -2,6 +2,17 @@
 
 本技能的所有重要变更记录在此。格式参考 Keep a Changelog，版本遵循 SemVer。
 
+## [4.1.1] - 2026-11-11
+
+### Fixed（复审后 4 个必须修项）
+
+- `extract_claims.py`：**行首小数被吞**——有序列表正则要求「1–3 位数字 + 分隔符 + 至少一个空白」，`1.5万亿美元` 不再被改成 `5万亿美元`，`3.12版本`、`2025.5%` 同理。
+- `extract_claims.py`：**混合 `#`/`##` 标题丢内容**——`parse_sections` 改为按标题层级解析，`# 执行摘要` 等 H1 章节不再被归入 `preamble` 跳过；围栏代码块内的 `#` 不当作标题。
+- `extract_claims.py`：**retired 无法复活**——本次报告重新出现的 retired 论点恢复为 `unverified`，避免「改回上一版」后全为 retired、校验以 `verified: 0` 假通过。
+- `verify_claim_support.py`：**活跃论点为 0 时判 fail**——全部 retired 或为空时不得判通过。
+- `verify_claim_support.py`：**A 类价格/规格事实零重叠一律 unsupported**——不再要求「同时缺年份/百分比」，修复「单价 120 美元配无关证据也能过」。
+- `tests/test_quality_gate.py`：新增 5 个回归用例（混合 H1/H2、小数保留、retired 复活、全 retired 失败、价格事实零重叠失败）。
+
 ## [4.1.0] - 2026-11-11
 
 ### Fixed（质量门：堵住 4 个「假通过」阻断项）
