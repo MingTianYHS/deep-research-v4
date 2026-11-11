@@ -19,6 +19,7 @@
 import sys
 import argparse
 import ipaddress
+import os
 import re
 import socket
 from pathlib import Path
@@ -373,10 +374,20 @@ class CitationVerifier:
                 result['status'] = 'unverified'
                 result['issues'].append(f"DOI resolution failed: {metadata.get('error', 'unknown')}")
 
-        # STEP 2.5: 本地 file:// 引用——不联网核验，单列为 local（既不算通过也不导致失败）
+        # STEP 2.5: 本地 file:// 引用——不联网，但必须真实存在；
+        # 存在记 local_ok（计入已核验），不存在记 unverified（strict 下失败）。
         if (entry.get('url') or '').startswith('file://'):
-            result['status'] = 'local'
-            result['verification_methods'].append('LOCAL')
+            raw_path = entry['url'][7:]
+            if re.match(r'^/[A-Za-z]:', raw_path):
+                raw_path = raw_path[1:]
+            local_path = raw_path.replace('/', os.sep)
+            if os.path.exists(local_path):
+                result['status'] = 'local_ok'
+                result['verification_methods'].append('LOCAL')
+                result['issues'].append('本地文件存在，未做内容核验')
+            else:
+                result['status'] = 'unverified'
+                result['issues'].append(f'本地文件不存在：{local_path}')
             return result
 
         # STEP 3: Check URL accessibility (if no DOI or DOI failed)
@@ -439,13 +450,12 @@ class CitationVerifier:
         verified = [r for r in results if r['status'] == 'verified']
         url_verified = [r for r in results if r['status'] == 'url_verified']
         suspicious = [r for r in results if r['status'] == 'suspicious']
-        local = [r for r in results if r['status'] == 'local']
+        local_ok = [r for r in results if r['status'] == 'local_ok']
         unverified = [r for r in results if r['status'] in ['unverified', 'no_doi', 'unknown']]
-        checkable = len(results) - len(local)
 
         print(f'DOI Verified: {len(verified)}/{len(results)}')
         print(f'URL Verified: {len(url_verified)}/{len(results)}')
-        print(f'Local refs (not checked): {len(local)}/{len(results)}')
+        print(f'Local files verified: {len(local_ok)}/{len(results)}')
         print(f'Suspicious: {len(suspicious)}/{len(results)}')
         print(f'Unverified: {len(unverified)}/{len(results)}')
         print()
@@ -464,8 +474,8 @@ class CitationVerifier:
                 print(f"  [{r['num']}] {r['issues'][0] if r['issues'] else 'Unknown'}")
             print()
 
-        # Decision (Enhanced 2025 - includes URL-verified as acceptable)
-        total_verified = len(verified) + len(url_verified)
+        # Decision (Enhanced 2025 - DOI / URL / local file 均算已核验)
+        total_verified = len(verified) + len(url_verified) + len(local_ok)
 
         if suspicious:
             print('WARNING: Suspicious citations detected')
@@ -479,15 +489,11 @@ class CitationVerifier:
             print('STRICT MODE: Unverified citations found')
             return False
 
-        if checkable == 0:
-            print('PASS: 全部为本地 file:// 引用，无需联网核验')
-            return True
-
         if total_verified == 0:
             print('FAIL: No citation could be verified (0 verified)')
             return False
 
-        if total_verified / checkable < 0.5:
+        if total_verified / len(results) < 0.5:
             print('WARNING: Less than 50% citations verified')
             return True  # Pass with warning
         else:

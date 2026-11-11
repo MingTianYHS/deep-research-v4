@@ -92,7 +92,8 @@ stars、forks、归档状态、许可证、默认分支、最后推送时间等�
 适用时运行：
 
 ```powershell
-python scripts\validate_open_source_solutions.py --artifact "research\<主题>_研究_<YYYYMMDD>\开源方案.jsonl" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\validate_open_source_solutions.py" --artifact "research\<主题>_研究_<YYYYMMDD>\开源方案.jsonl" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict
 ```
 
 校验失败时先修 `开源方案.jsonl` 或报告中的缺失项，再重跑；连续 2 次仍失败，停止并说明具体缺口。

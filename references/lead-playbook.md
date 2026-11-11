@@ -79,6 +79,7 @@ python "$skill/scripts/citation_manager.py" init-run --query "研究问题" --mo
 DSH 中若 `python` 不在 PATH，使用 DSH 自带 Python：
 
 ```
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
 & "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" "$skill\scripts\citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
 

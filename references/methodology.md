@@ -86,9 +86,10 @@
 每批检索完成后立即登记来源并写入证据，不要只留在对话上下文：
 
 ```powershell
-> 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file（PowerShell 下最稳）
-python scripts\citation_manager.py register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
-python scripts\evidence_store.py add --json-file "证据1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+# 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file（PowerShell 下最稳）
+& $py "$skill\scripts\citation_manager.py" register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
+& $py "$skill\scripts\evidence_store.py" add --json-file "证据1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
 ```
 
 来源写入 `来源.jsonl`，证据写入 `证据.jsonl`。稳定 `source_id` 用于跨轮次、跨代理复用；完整字段见 `references/evidence-chain.md`。
@@ -225,11 +226,12 @@ python scripts\evidence_store.py add --json-file "证据1.json" --dir "research\
 **交付前校验**（完整清单以 `references/quality-gates.md:37-45` 为准）：
 
 ```powershell
-python scripts\extract_claims.py extract --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --dir "research\<主题>_研究_<YYYYMMDD>"
-python scripts\citation_manager.py link-claims --dir "research\<主题>_研究_<YYYYMMDD>"
-python scripts\verify_claim_support.py verify --dir "research\<主题>_研究_<YYYYMMDD>" --profile standard --strict
-python scripts\validate_report.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --profile standard
-python scripts\verify_citations.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\extract_claims.py" extract --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --dir "research\<主题>_研究_<YYYYMMDD>"
+& $py "$skill\scripts\citation_manager.py" link-claims --dir "research\<主题>_研究_<YYYYMMDD>"
+& $py "$skill\scripts\verify_claim_support.py" verify --dir "research\<主题>_研究_<YYYYMMDD>" --profile standard --strict
+& $py "$skill\scripts\validate_report.py" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --profile standard
+& $py "$skill\scripts\verify_citations.py" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict
 ```
 
 `--profile` 按实际路径取 `direct` / `standard` / `deep`，`validate_report.py` 需与 `verify_claim_support.py` 使用同一档位。

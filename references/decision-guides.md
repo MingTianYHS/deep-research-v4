@@ -68,4 +68,4 @@
 - [ ] 硬门槛出现在任何加权评分之前。
 - [ ] `### 选择结果` 用文字覆盖全部终端建议。
 - [ ] 读者能在 1 分钟内按自己的场景得到明确结论。
-- [ ] 已运行 `python scripts\validate_decision_guide.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict` 并通过。
+- [ ] 已运行 `"$skill\scripts\validate_decision_guide.py" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict` 并通过。

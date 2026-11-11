@@ -60,14 +60,16 @@ run 目录内统一使用以下中文文件名：
 每遇到一个新来源就登记，不要等写报告时补：
 
 ```powershell
-> 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file
-python scripts\citation_manager.py register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+# 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file
+& $py "$skill\scripts\citation_manager.py" register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
 ```
 
 脚本返回稳定的 `source_id`（基于哈希，续写和重排后不变）。正文中的显示编号在全部来源登记完成后统一生成：
 
 ```powershell
-python scripts\citation_manager.py assign-display-numbers --dir "research\<主题>_研究_<YYYYMMDD>"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\citation_manager.py" assign-display-numbers --dir "research\<主题>_研究_<YYYYMMDD>"
 ```
 
 显示编号只是渲染结果，不写回来源记录；这样上下文压缩或续写后仍能按 `source_id` 恢复引用关系。
@@ -78,7 +80,7 @@ python scripts\citation_manager.py assign-display-numbers --dir "research\<主�
 
 1. **标题与执行摘要**（200–400 字）：用 `write` 创建 `研究报告.md`，写标题与执行摘要。摘要必须独立成立，只读摘要也能抓住核心答案；不要写「本文将……」。
 2. **引言**（400–800 字）：写研究问题、范围与方法、关键假设，说明研究背景与问题重要性。用 `edit` 追加。
-3. **分支决策指南**（条件章节，对比、选型、采购、架构选择、采纳类报告必写）：放在引言之后、详细发现之前。先写会改变答案的硬门槛，再写分支路径与终端建议，最后在 `### 选择结果` 小节用文字重复所有终端结论。写完运行 `python scripts\validate_decision_guide.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict`。
+3. **分支决策指南**（条件章节，对比、选型、采购、架构选择、采纳类报告必写）：放在引言之后、详细发现之前。先写会改变答案的硬门槛，再写分支路径与终端建议，最后在 `### 选择结果` 小节用文字重复所有终端结论。写完运行 `"$skill\scripts\validate_decision_guide.py" --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict`。
 4. **发现 1–N**（每节 600–2000 字）：按逻辑分节，每节围绕一个可检验的判断展开；具体数字、日期、名称写在句子里，并紧跟 `[N]` 引用。用 `edit` 逐节追加。
 5. **开源方案全景**（条件章节，软件/工具/自动化/实现类报告必写）：基于 `开源方案.jsonl` 写对比表与文字分析，给出 canonical 仓库直链，区分仓库事实与采纳建议；完成后按 `references/open-source-solutions.md` 运行 `validate_open_source_solutions.py --strict`。
 6. **分析综合**：比较不同视角、识别模式与矛盾，说明证据强弱；不要把前文事实简单复述一遍。

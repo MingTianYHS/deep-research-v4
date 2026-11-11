@@ -2,6 +2,17 @@
 
 本技能的所有重要变更记录在此。格式参考 Keep a Changelog，版本遵循 SemVer。
 
+## [4.4.0] - 2026-11-11
+
+### Fixed（复审收尾）
+
+- **参考文档脚本命令全部改为绝对路径变量**：`evidence-chain.md`、`html-generation.md`、`report-assembly.md`、`methodology.md`、`decision-guides.md`、`open-source-solutions.md` 中所有 `python scripts\...` / `& $py scripts\...` 改为 `& $py "$skill\scripts\..."`，每个代码块开头统一定义 `$skill` 与 `$py`；从用户工作目录直接复制即可运行，不再 `Errno 2`。
+- **`file://` 策略统一**：`validate_report.py` 要求 `file://` 指向真实存在的本地文件，不存在则判 error；`verify_citations.py` 按文件存在性记为 `local_ok`（计入已核验）或 `unverified`（strict 下失败）。不再出现「全本地引用直接 PASS」的零核验通道；`quality-gates.md` 同步更新说明。
+
+### Tests
+
+- 全套 143 个用例通过；另以真实报告验证：13 条引用中 7 条 URL + 4 条本地文件 = 11 条已核验，通过。
+
 ## [4.3.0] - 2026-11-11
 
 ### Fixed（复审 B 批）

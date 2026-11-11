@@ -5,6 +5,7 @@ Ensures research reports meet quality standards before delivery
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -284,15 +285,30 @@ class ReportValidator:
                 self.errors.append(f"参考文献编号不连续：缺少 {missing}")
                 return False
 
-        # 每条参考文献必须带可定位链接（公网 http(s) 或本地 file:// 引用）
-        no_url = []
+        # 每条参考文献必须带链接：http(s) 公网地址，或真实存在的本地 file://。
+        # file:// 必须校验文件存在——否则「本地引用」会变成零核验的放行通道。
+        problems = []
         for raw_line in bib_section.split('\n'):
             line = raw_line.strip()
             m = re.match(r'^\[(\d+)\]', line) or re.match(r'^(\d+)[.、)）]\s+', line)
-            if m and not re.search(r'(?:https?|file)://', line):
-                no_url.append(m.group(1))
-        if no_url:
-            self.errors.append(f"参考文献条目缺少链接（http(s):// 或 file://）：{sorted(no_url, key=int)}")
+            if not m:
+                continue
+            num = m.group(1)
+            if re.search(r'https?://', line):
+                continue
+            fm = re.search(r'file://([^\s)\]]+)', line)
+            if fm:
+                raw_path = fm.group(1)
+                if re.match(r'^/[A-Za-z]:', raw_path):
+                    raw_path = raw_path[1:]
+                local_path = raw_path.replace('/', os.sep)
+                if os.path.exists(local_path):
+                    continue
+                problems.append(f"[{num}] 本地文件不存在：{local_path}")
+                continue
+            problems.append(f"[{num}] 缺少链接")
+        if problems:
+            self.errors.append("参考文献链接无效：" + "；".join(problems))
             return False
 
         # Find citations in text（只算正文，不含参考文献自身）

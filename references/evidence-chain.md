@@ -96,7 +96,8 @@ $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python
 再运行：
 
 ```powershell
-& $py scripts\citation_manager.py register-source --dir "[run目录]" --json-file "来源1.json"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\citation_manager.py" register-source --dir "[run目录]" --json-file "来源1.json"
 ```
 
 PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优先用 `--json-file`。也支持 `--json -` 从标准输入读取。
@@ -114,7 +115,8 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 再运行：
 
 ```powershell
-& $py scripts\evidence_store.py add --dir "[run目录]" --json-file "证据1.json"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\evidence_store.py" add --dir "[run目录]" --json-file "证据1.json"
 ```
 
 原则：一份证据只对应一段原文；不要把整篇文章塞进一个 quote。quote 必须是来源中真实存在的文字。
@@ -122,7 +124,8 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 ### 3.4 抽取论点
 
 ```powershell
-& $py scripts\extract_claims.py extract --report "[run目录]\研究报告.md" --dir "[run目录]"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\extract_claims.py" extract --report "[run目录]\研究报告.md" --dir "[run目录]"
 ```
 
 脚本按标题拆分章节、按中文句号/问号/叹号或英文标点切句，并初步分类 `claim_type` 与 `materiality`。自动分类是启发式，负责人需要复核；随后运行 `link-claims` 把引用编号关联到来源。
@@ -130,7 +133,8 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 ### 3.5 关联论点与来源
 
 ```powershell
-& $py scripts\citation_manager.py link-claims --dir "[run目录]"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\citation_manager.py" link-claims --dir "[run目录]"
 ```
 
 把 `论点.jsonl` 里的 `_citation_numbers`（正文中的 `[1]`、`[2]`）按 `来源.jsonl` 的登记顺序（**先去重再编号**）映射为稳定 `source_id`，写入 `cited_source_ids`。如果出现 `unresolved_citation_numbers`，说明正文引用编号在来源表中找不到对应项，命令会以退出码 1 失败；先修报告或补登记来源。
@@ -138,7 +142,8 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 ### 3.6 校验论点支撑
 
 ```powershell
-& $py scripts\verify_claim_support.py verify --dir "[run目录]" --profile standard --strict
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\verify_claim_support.py" verify --dir "[run目录]" --profile standard --strict
 ```
 
 `--profile` 可选 `direct` / `standard` / `deep`。标准档对 A 类硬事实严格，深研对所有 factual 严格，直查只警告。`needs_review` / `partial` 不阻塞，会进入 `advisory` 清单供人工复核。
@@ -146,7 +151,8 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 ### 3.7 导出参考文献
 
 ```powershell
-& $py scripts\citation_manager.py export-bibliography --dir "[run目录]" --style markdown
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\citation_manager.py" export-bibliography --dir "[run目录]" --style markdown
 ```
 
 生成编号参考文献，可粘贴到 `研究报告.md` 的「参考文献」一节，再核对正文编号。

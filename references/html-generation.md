@@ -23,7 +23,8 @@
 ### 1. 直接生成 HTML
 
 ```powershell
-python scripts\md_to_html.py "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\md_to_html.py" "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
 ```
 
 默认行为：
@@ -45,7 +46,8 @@ python scripts\md_to_html.py "research\<主题>_研究_<YYYYMMDD>\研究报告.m
 示例：显式指定输出文件（模板使用技能自带默认值）：
 
 ```powershell
-python scripts\md_to_html.py "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --output "research\<主题>_研究_<YYYYMMDD>\报告.html"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\md_to_html.py" "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --output "research\<主题>_研究_<YYYYMMDD>\报告.html"
 ```
 
 ### 2. 模板占位符（由脚本填充）
@@ -64,7 +66,8 @@ python scripts\md_to_html.py "research\<主题>_研究_<YYYYMMDD>\研究报告.m
 ### 3. 校验 HTML
 
 ```powershell
-python scripts\verify_html.py --html "research\<主题>_研究_<YYYYMMDD>\报告.html" --md "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
+$skill = "<DSH 技能根目录>\deep-research"; $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py "$skill\scripts\verify_html.py" --html "research\<主题>_研究_<YYYYMMDD>\报告.html" --md "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
 ```
 
 校验内容包括：Markdown 章节是否全部出现在 HTML、占位符是否清空、是否有 emoji、HTML 基本结构、引用与参考文献是否保留。失败时按错误提示修复后重跑，不要交付未通过校验的文件。
