@@ -106,11 +106,14 @@ def _convert_content_section(markdown: str) -> str:
 def _convert_inline_links(html: str) -> str:
     """只激活 HTTP(S) Markdown 链接，其他协议保持惰性文本。
 
-    链接文本与 href 均做 HTML 转义；href 额外中和双引号，防止属性逃逸。
+    输入已经过 HTML 转义（& < > 已变成实体），因此：
+    - label 不再二次转义（否则 & 会变成 &amp;amp;）；
+    - href 先 unescape 还原真实 URL，再按属性转义一次，防止双重转义。
     """
     def repl(m: re.Match) -> str:
-        label = html_lib.escape(m.group(1), quote=False)
-        url = html_lib.escape(m.group(2), quote=True).replace('"', '%22')
+        label = m.group(1)
+        raw_url = html_lib.unescape(m.group(2))
+        url = html_lib.escape(raw_url, quote=True).replace('"', '%22')
         return f'<a href="{url}" target="_blank" rel="noreferrer">{label}</a>'
 
     return re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', repl, html)
