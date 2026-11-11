@@ -75,6 +75,11 @@ def _convert_content_section(markdown: str) -> str:
 
     content = '\n'.join(processed_lines)
 
+    # 安全：先把所有文本转义为 HTML 实体，再生成标签。
+    # 这样报告正文（含从网页摘录的引文）中的 <script>/<img onerror> 等
+    # 原始 HTML 不会被执行；后续只插入本函数生成的可信标签。
+    content = html_lib.escape(content, quote=False)
+
     def _section_tag(match: re.Match) -> str:
         title = match.group(1).strip()
         if title in _EXEC_SUMMARY_NAMES:
@@ -99,12 +104,16 @@ def _convert_content_section(markdown: str) -> str:
 
 
 def _convert_inline_links(html: str) -> str:
-    """只激活 HTTP(S) Markdown 链接，其他协议保持惰性文本。"""
-    return re.sub(
-        r'\[([^\]]+)\]\((https?://[^\s)]+)\)',
-        r'<a href="\2" target="_blank" rel="noreferrer">\1</a>',
-        html,
-    )
+    """只激活 HTTP(S) Markdown 链接，其他协议保持惰性文本。
+
+    链接文本与 href 均做 HTML 转义；href 额外中和双引号，防止属性逃逸。
+    """
+    def repl(m: re.Match) -> str:
+        label = html_lib.escape(m.group(1), quote=False)
+        url = html_lib.escape(m.group(2), quote=True).replace('"', '%22')
+        return f'<a href="{url}" target="_blank" rel="noreferrer">{label}</a>'
+
+    return re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', repl, html)
 
 
 def _convert_bibliography_section(markdown: str) -> str:
@@ -121,9 +130,17 @@ def _convert_bibliography_section(markdown: str) -> str:
         if not match:
             continue
         number, rest = match.group(1), match.group(2).strip()
-        rest_html = _convert_inline_links(rest)
+        # 安全：条目正文先转义，再识别链接（模板输出为 HTML）
+        rest_html = html_lib.escape(rest, quote=False)
+        rest_html = _convert_inline_links(rest_html)
+
+        def url_repl(m: re.Match) -> str:
+            raw = html_lib.unescape(m.group(1))
+            href = html_lib.escape(raw, quote=True).replace('"', '%22')
+            return f'<a href="{href}" target="_blank" rel="noreferrer">{m.group(1)}</a>'
+
         # 纯 URL 也转成可点击链接
-        rest_html = re.sub(r'(?<!["\'>])(https?://[^\s<]+)', r'<a href="\1" target="_blank" rel="noreferrer">\1</a>', rest_html)
+        rest_html = re.sub(r'(?<!["\'&gt;])(https?://[^\s<]+)', url_repl, rest_html)
         entries.append(
             f'<div class="bib-entry"><span class="bib-number">[{number}]</span> {rest_html}</div>'
         )
@@ -132,12 +149,17 @@ def _convert_bibliography_section(markdown: str) -> str:
 
 
 def count_bibliography_entries(markdown_text: str) -> int:
-    """统计参考文献条目数，作为没有 来源.jsonl 时的回退值。"""
+    """统计参考文献条目数，作为没有 来源.jsonl 时的回退值。
+
+    只统计参考文献章节本身（到下一个二级标题为止），避免把方法论附录等
+    后续章节里的编号列表误算进来。
+    """
     parts = re.split(r'##\s*(?:Bibliography|References|参考文献)[^\n]*\n', markdown_text, maxsplit=1)
     if len(parts) < 2:
         return 0
+    body = re.split(r'^##\s+', parts[1], maxsplit=1, flags=re.MULTILINE)[0]
     count = 0
-    for line in parts[1].split('\n'):
+    for line in body.split('\n'):
         line = line.strip()
         if re.match(r'^\[(\d+)\]', line) or re.match(r'^\d+[.、)）]\s+', line):
             count += 1

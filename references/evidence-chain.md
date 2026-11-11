@@ -26,8 +26,8 @@
 | `title` | 来源标题 |
 | `authors` | 作者列表或 null |
 | `year` | 年份或 null |
-| `source_type` | `official` / `academic` / `news` / `industry` / `web` / `other` |
-| `metadata_status` | `unverified` / `verified` / `conflicted` |
+| `source_type` | `official` / `academic` / `news` / `industry` / `web` / `other` / `documentation` / `code` / `government` / `book` |
+| `metadata_status` | 登记时写入 `unverified`；如需标记人工核验结论，可改为 `doi_verified` / `url_verified` / `title_matched` / `verified` / `conflicted`（脚本不自动回写，需人工或后续工具更新） |
 | `registered_at` | ISO 8601 时间 |
 
 ### 2.2 `证据.jsonl`
@@ -40,7 +40,7 @@
 | `source_id` | 对应 `来源.jsonl` 的 source_id |
 | `quote` | 原文片段（尽量逐字，不要改写） |
 | `locator` | 页码、章节标题、URL 锚点或时间戳 |
-| `evidence_type` | `direct_quote` / `paraphrase` / `data_point` / `official_statement` |
+| `evidence_type` | `direct_quote` / `paraphrase` / `data_point` / `official_statement` / `methodology` |
 | `captured_at` | ISO 8601 时间 |
 | `query` | 触发这条证据的检索式或任务（可选） |
 
@@ -57,22 +57,25 @@
 | `materiality` | `A` / `B` / `C` / `D` |
 | `cited_source_ids` | 该句引用的来源 ID 列表 |
 | `evidence_ids` | 支持该句的证据 ID 列表 |
-| `support_status` | `unverified` / `supported` / `partial` / `needs_review` / `unsupported` |
+| `support_status` | `unverified` / `supported` / `partial` / `needs_review` / `unsupported` / `retired`（改稿后不再出现的旧论点会被标记 retired，不参与校验） |
 | `_support_score` | 脚本计算的重合分（0–1） |
 | `extracted_at` | ISO 8601 时间 |
 
 ### 2.4 `运行清单.json`
 
-记录本轮研究的基本信息：版本、查询、模式、查询形态、验证强度、预算、开始/结束时间、假设、报告目录、产物路径、续写信息。`citation_manager.py init-run` 自动创建，交付前由负责人补 `finished_at`。
+记录本轮研究的基本信息：版本、查询、模式、查询形态、验证强度、预算、开始/结束时间、假设、报告目录、产物路径、续写信息。`citation_manager.py init-run` 自动创建；**交付前运行 `citation_manager.py finalize-run --dir "[run目录]"` 写入 `finished_at` 与关键假设**，不要手工编辑 JSON。
 
 ## 3. 操作流程
 
 ### 3.1 初始化 run 目录
 
 ```powershell
+$skill = "<DSH 技能根目录>\deep-research"
 $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-& $py scripts\citation_manager.py init-run --query "研究问题" --mode standard
+& $py "$skill\scripts\citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
+
+**始终以用户工作目录为 cwd，用 `--out-dir` 显式指定 run 目录**，不要写进技能安装目录。
 
 输出示例：
 
@@ -130,7 +133,7 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 & $py scripts\citation_manager.py link-claims --dir "[run目录]"
 ```
 
-把 `论点.jsonl` 里的 `_citation_numbers`（正文中的 `[1]`、`[2]`）按 `来源.jsonl` 的登记顺序映射为稳定 `source_id`，写入 `cited_source_ids`。如果出现 `unresolved_citation_numbers`，说明正文引用编号在来源表中找不到对应项，先修报告或补登记来源。
+把 `论点.jsonl` 里的 `_citation_numbers`（正文中的 `[1]`、`[2]`）按 `来源.jsonl` 的登记顺序（**先去重再编号**）映射为稳定 `source_id`，写入 `cited_source_ids`。如果出现 `unresolved_citation_numbers`，说明正文引用编号在来源表中找不到对应项，命令会以退出码 1 失败；先修报告或补登记来源。
 
 ### 3.6 校验论点支撑
 
@@ -138,9 +141,9 @@ PowerShell 直接传 `--json '{"..."}'` 时内层双引号可能被剥离；优�
 & $py scripts\verify_claim_support.py verify --dir "[run目录]" --profile standard --strict
 ```
 
-`--profile` 可选 `direct` / `standard` / `deep`。标准档对 A 类硬事实严格，深研对所有 factual 严格，直查只警告。
+`--profile` 可选 `direct` / `standard` / `deep`。标准档对 A 类硬事实严格，深研对所有 factual 严格，直查只警告。`needs_review` / `partial` 不阻塞，会进入 `advisory` 清单供人工复核。
 
-### 3.6 导出参考文献
+### 3.7 导出参考文献
 
 ```powershell
 & $py scripts\citation_manager.py export-bibliography --dir "[run目录]" --style markdown

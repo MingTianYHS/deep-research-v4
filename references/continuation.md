@@ -127,8 +127,8 @@
 - 写完剩余章节。
 - 生成完整参考文献，覆盖正文所有 `[N]`，不得缺号、截断或写区间。
 - 从头通读全文，检查章节衔接与重复。
-- 运行 `python scripts\validate_report.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md"` 与 `python scripts\verify_citations.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md"`。
-- 删除 `续写状态.json`，在 `运行清单.json` 标记完成。
+- 按 `references/quality-gates.md:37-45` 的完整清单重跑校验：`extract_claims.py` → `citation_manager.py link-claims` → `verify_claim_support.py --profile <档位> --strict` → `validate_report.py --profile <档位>` → `verify_citations.py --strict`。
+- 运行 `citation_manager.py finalize-run --dir "[run目录]"` 写入完成时间，删除 `续写状态.json`。
 - 向用户报告最终文件路径与简要结论。
 
 ## 用户沟通

@@ -265,15 +265,15 @@ class ReportValidator:
                 self.errors.append(f"参考文献编号不连续：缺少 {missing}")
                 return False
 
-        # 每条参考文献必须带可访问链接（无 URL 的条目不得通过）
+        # 每条参考文献必须带可定位链接（公网 http(s) 或本地 file:// 引用）
         no_url = []
         for raw_line in bib_section.split('\n'):
             line = raw_line.strip()
             m = re.match(r'^\[(\d+)\]', line) or re.match(r'^(\d+)[.、)）]\s+', line)
-            if m and not re.search(r'https?://', line):
+            if m and not re.search(r'(?:https?|file)://', line):
                 no_url.append(m.group(1))
         if no_url:
-            self.errors.append(f"参考文献条目缺少 URL：{sorted(no_url, key=int)}")
+            self.errors.append(f"参考文献条目缺少链接（http(s):// 或 file://）：{sorted(no_url, key=int)}")
             return False
 
         # Find citations in text（只算正文，不含参考文献自身）

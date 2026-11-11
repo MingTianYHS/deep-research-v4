@@ -8,7 +8,7 @@
 
 篇幅按 `references/report-template.md` 执行：直查 500–1000 字；标准研究 1500–3000 字；深研 3000–5000 字（复杂主题可延长）。所有路径都按本节规则分节写入。
 
-- 全文不超过 8000 字：先完成研究与提纲，再按章节一次性或分 2–3 次写入。
+- 全文不超过 8000 字：先完成研究与提纲，再**按节分批写入（每节一次，通常 3–5 次）**，不要试图一次性写完。
 - 全文 8000–18000 字：必须使用渐进式写作，每节单独写入。
 - 全文超过 18000 字：在渐进式写作基础上启用 `references/continuation.md` 的续写协议。
 
@@ -19,10 +19,11 @@
 run 目录统一为 `research/<主题>_研究_<YYYYMMDD>/`（Windows 实际路径写作 `research\<主题>_研究_<YYYYMMDD>\`）。先用 `citation_manager.py` 解析并创建，不要手工拼目录名：
 
 ```powershell
-python scripts\citation_manager.py init-run --query "研究问题" --mode standard
+$skill = "<DSH 技能根目录>\deep-research"
+python "$skill\scripts\citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
 
-直查把 `--mode` 改为 `direct`，深研改为 `deep`；深研需要更大预算时追加 `--budget extended`。查询形态为广度优先时加 `--query-type breadth`（默认 `depth`）。
+直查用 `direct`，标准研究用 `standard`，深研用 `deep`；深研需要更大预算时追加 `--budget extended`。查询形态为广度优先时加 `--query-type breadth`（默认 `depth`）。**始终以用户工作目录为 cwd，用 `--out-dir` 显式指定 run 目录**，避免产物落进技能安装目录。
 
 脚本返回的 `dir` 就是本轮 run 目录（通常为当前工作目录下的绝对路径）。后续所有脚本调用都原样使用该路径；主题清洗、中文「研究」后缀、日期与重名后缀 `_2` / `_3` 都由脚本负责。
 
@@ -59,7 +60,7 @@ run 目录内统一使用以下中文文件名：
 每遇到一个新来源就登记，不要等写报告时补：
 
 ```powershell
-# 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file
+> 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file
 python scripts\citation_manager.py register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
 ```
 

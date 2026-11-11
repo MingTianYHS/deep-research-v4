@@ -50,33 +50,10 @@ def compute_claim_id(section_id: str, text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSONL 读写辅助（全部显式 UTF-8）
+# JSONL 读写辅助（共享 _jsonl，统一 UTF-8 / 原子写 / 缺失语义）
 # ---------------------------------------------------------------------------
 
-def append_jsonl(path: str, obj: dict) -> None:
-    with open(path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + '\n')
-
-
-def write_jsonl(path: str, rows: list) -> None:
-    """原子重写：先写临时文件再替换，避免中断留下半截 JSONL。"""
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + '\n')
-    os.replace(tmp, path)
-
-
-def read_jsonl(path: str) -> list[dict]:
-    rows = []
-    if not os.path.exists(path):
-        return rows
-    with open(path, encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+from _jsonl import append_jsonl, read_jsonl, write_jsonl  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

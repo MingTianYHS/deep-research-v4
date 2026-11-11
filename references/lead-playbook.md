@@ -69,19 +69,20 @@
 
 ### 3.1 先创建 run 目录
 
-在写计划前，先用 `citation_manager.py init-run` 创建 run 目录，拿到实际路径。以下命令均在技能根目录执行；DSH 中若 `python` 不在 PATH，用 SKILL.md 第 3 步给出的绝对路径。
+在写计划前，先用 `citation_manager.py init-run` 创建 run 目录，拿到实际路径。**始终以用户工作目录为 cwd**，用 `--out-dir` 显式指定 run 目录（不要写进技能安装目录）。`--mode` 必须与第 2 节判定的研究路径一致。
 
 ```
-python scripts/citation_manager.py init-run --query "研究问题" --mode standard
+$skill = "<DSH 技能根目录>\deep-research"
+python "$skill/scripts/citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
 
 DSH 中若 `python` 不在 PATH，使用 DSH 自带 Python：
 
 ```
-& "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" scripts\citation_manager.py init-run --query "研究问题" --mode standard
+& "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" "$skill\scripts\citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
 
-输出中的 `dir` 就是本轮 run 目录，后续计划、报告与所有 JSONL 都写在这里。
+深研需要更大预算时追加 `--budget extended`；广度优先时加 `--query-type breadth`。输出中的 `dir` 就是本轮 run 目录，后续计划、报告与所有 JSONL 都写在这里。
 
 ### 3.2 计划必须落盘
 
@@ -98,7 +99,7 @@ DSH 中若 `python` 不在 PATH，使用 DSH 自带 Python：
 
 ### 3.3 微信公众号检索要求
 
-中文相关主题应优先评估并使用 `wechat-article-search` 技能。计划中必须明确：哪些子任务用微信公众号检索、关键词、时间范围（`--days`、`--hours` 或 `--time-range` 至少一个）、以及如何与网页搜索结果交叉印证。若该技能失败（反爬、验证码、结果不足），改用 `web_search` 与 `web_fetch` 补充，不要因单一渠道失败而中断研究。
+中文相关主题应优先评估并使用 `wechat-article-search` 技能（**由主代理加载并执行检索**，不要下放给子代理）。计划中必须明确：哪些子任务用微信公众号检索、关键词、时间范围（`--days`、`--hours` 或 `--time-range` 至少一个）、以及如何与网页搜索结果交叉印证。若该技能失败（反爬、验证码、结果不足），改用 `web_search` 与 `web_fetch` 补充，不要因单一渠道失败而中断研究。
 
 ## 4. 第三阶段：并行派发子代理
 
@@ -134,7 +135,7 @@ DSH 中若 `python` 不在 PATH，使用 DSH 自带 Python：
 - 与用户问题的关系、该子代理如何为整体研究贡献；
 - 需要回答的关键问题；
 - 建议的起点与高质量来源类型；
-- 明确工具：`web_search`、`web_fetch`；中文信息先 `skill` 加载 `wechat-article-search`；需要脚本时用 `pwsh`；
+- 明确工具：`web_search`、`web_fetch`；需要脚本时用 `pwsh`。**配套技能（如 `wechat-article-search`）由主代理加载，子代理不调用 `skill` 工具**——主代理把检索线索或已抓取结果传给子代理，避免子代理上下文缺少技能目录而失败；
 - 精确范围边界，防止跑偏；
 - 输出语言：中文（引用原文可保留原语言，但说明用中文）。
 
@@ -267,7 +268,7 @@ PowerShell 下登记来源与写入证据时，JSON 参数优先用 `--json-file
 7. 主要结论是否有足够的独立来源簇（standard 2 个 / deep 3 个）？
 8. 报告是否为中文、无 emoji、References 完整可点击？
 9. 产出目录与文件名是否为中文规范名称？
-10. `运行清单.json` 是否已更新 `finished_at` 与关键假设？
+10. `运行清单.json` 是否已用 `citation_manager.py finalize-run --dir "[run目录]"` 写入 `finished_at` 与关键假设？
 
 校验失败按 `references/quality-gates.md` 的修复循环处理，最多 3 轮；仍失败则如实向用户报告问题，不要假装通过。
 

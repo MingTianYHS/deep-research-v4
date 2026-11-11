@@ -191,33 +191,10 @@ def compute_source_id(canonical_locator: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSONL 读写辅助（全部显式 UTF-8）
+# JSONL 读写辅助（共享 _jsonl，统一 UTF-8 / 原子写 / 缺失语义）
 # ---------------------------------------------------------------------------
 
-def append_jsonl(path: str, obj: dict) -> None:
-    with open(path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + '\n')
-
-
-def read_jsonl(path: str) -> list[dict]:
-    rows = []
-    if not os.path.exists(path):
-        return rows
-    with open(path, encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
-def write_jsonl(path: str, rows: list[dict]) -> None:
-    # 原子重写：先写临时文件再替换，避免中断/磁盘满留下半截 JSONL
-    tmp = path + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + '\n')
-    os.replace(tmp, path)
+from _jsonl import append_jsonl, read_jsonl, write_jsonl  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +225,7 @@ def cmd_init_run(args: argparse.Namespace) -> None:
     query_type = args.query_type or ('direct' if args.mode == 'direct' else 'depth')
 
     manifest = {
-        'version': '4.0.0',
+        'version': '4.1.0',
         'query': args.query or '',
         'query_type': query_type,
         'rigor': rigor,

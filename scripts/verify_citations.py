@@ -18,14 +18,70 @@
 
 import sys
 import argparse
+import ipaddress
 import re
+import socket
 from pathlib import Path
 from typing import List, Dict, Tuple
 from urllib import request, error
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 import json
 import time
 from datetime import datetime
+
+
+# 明确需要拒绝的地址段（不用 ip.is_private，避免把沙箱/基准测试网段
+# 198.18.0.0/15 误判为私有地址而阻断正常公网访问）。
+_BLOCKED_V4 = [
+    ipaddress.ip_network('0.0.0.0/8'),
+    ipaddress.ip_network('10.0.0.0/8'),
+    ipaddress.ip_network('100.64.0.0/10'),   # CGNAT
+    ipaddress.ip_network('127.0.0.0/8'),
+    ipaddress.ip_network('169.254.0.0/16'),  # 链路本地 / 云元数据
+    ipaddress.ip_network('172.16.0.0/12'),
+    ipaddress.ip_network('192.168.0.0/16'),
+]
+_BLOCKED_V6 = [
+    ipaddress.ip_network('::1/128'),
+    ipaddress.ip_network('fc00::/7'),        # 唯一本地地址
+    ipaddress.ip_network('fe80::/10'),       # 链路本地
+]
+
+
+def _is_blocked_ip(ip) -> bool:
+    if isinstance(ip, ipaddress.IPv4Address):
+        return any(ip in net for net in _BLOCKED_V4)
+    return any(ip in net for net in _BLOCKED_V6)
+
+
+# 安全：只允许 http/https，且解析后的地址不得是回环/私有/链路本地/保留地址。
+# 报告中的 URL 来自不可信网页，必须防止被诱导访问本机或云元数据端点（SSRF）。
+def is_safe_url(url: str) -> Tuple[bool, str]:
+    """校验 URL 协议与目标地址是否允许访问。"""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False, 'invalid URL'
+
+    if parsed.scheme not in ('http', 'https'):
+        return False, f'unsupported scheme: {parsed.scheme or "(none)"}'
+    if not parsed.hostname:
+        return False, 'no host'
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or None)
+    except Exception:
+        return False, f'DNS resolution failed: {parsed.hostname}'
+
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False, f'invalid address: {info[4][0]}'
+        if _is_blocked_ip(ip):
+            return False, f'blocked non-public address: {ip}'
+    return True, ''
+
 
 class CitationVerifier:
     """Verify citations in research report"""
@@ -95,7 +151,7 @@ class CitationVerifier:
                 title_match = re.search(r'"([^"]+)"', rest)
                 md_link_match = re.search(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', rest)
                 doi_match = re.search(r'doi\.org/(10\.\S+)', rest)
-                url_match = re.search(r'https?://[^\s\)]+', rest)
+                url_match = re.search(r'(?:https?|file)://[^\s\)]+', rest)
 
                 current_entry = {
                     'num': num,
@@ -151,26 +207,47 @@ class CitationVerifier:
         """
         Verify URL is accessible (2025 CiteGuard enhancement).
         Returns (accessible, status_message)
+
+        安全：先做协议/地址白名单校验（防 SSRF）；HEAD 被 403/405/501 拒绝时
+        回退 GET（Range: bytes=0-0），避免不支持 HEAD 的站点被误判。
         """
         if not url:
             return False, "No URL"
 
-        try:
-            # HEAD request to check accessibility without downloading
-            req = request.Request(url, method='HEAD')
-            req.add_header('User-Agent', 'Mozilla/5.0 (Research Citation Verifier)')
+        safe, reason = is_safe_url(url)
+        if not safe:
+            return False, f"blocked: {reason}"
 
-            with request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    return True, "URL accessible"
-                else:
-                    return False, f"HTTP {response.status}"
-        except error.HTTPError as e:
-            return False, f"HTTP {e.code}"
-        except error.URLError as e:
-            return False, f"URL error: {e.reason}"
-        except Exception as e:
-            return False, f"Connection error: {str(e)[:50]}"
+        def _request(method: str) -> Tuple[bool, str, int]:
+            req = request.Request(url, method=method)
+            req.add_header('User-Agent', 'Mozilla/5.0 (Research Citation Verifier)')
+            if method == 'GET':
+                req.add_header('Range', 'bytes=0-0')
+            try:
+                with request.urlopen(req, timeout=10) as response:
+                    code = response.status
+                    # 2xx 与 3xx（urllib 已跟随重定向）视为可访问
+                    ok = 200 <= code < 400
+                    return ok, f"HTTP {code}", code
+            except error.HTTPError as e:
+                return False, f"HTTP {e.code}", e.code
+            except error.URLError as e:
+                return False, f"URL error: {e.reason}", 0
+            except Exception as e:
+                return False, f"Connection error: {str(e)[:50]}", 0
+
+        ok, msg, code = _request('HEAD')
+        if ok:
+            return True, "URL accessible"
+
+        # HEAD 不被支持/被拒时用 GET 复核
+        if code in (403, 405, 501, 400):
+            ok2, msg2, _ = _request('GET')
+            if ok2:
+                return True, "URL accessible (GET fallback)"
+            return False, msg2
+
+        return False, msg
 
     def detect_hallucination_patterns(self, entry: Dict) -> List[str]:
         """
@@ -296,6 +373,12 @@ class CitationVerifier:
                 result['status'] = 'unverified'
                 result['issues'].append(f"DOI resolution failed: {metadata.get('error', 'unknown')}")
 
+        # STEP 2.5: 本地 file:// 引用——不联网核验，单列为 local（既不算通过也不导致失败）
+        if entry.get('url', '').startswith('file://'):
+            result['status'] = 'local'
+            result['verification_methods'].append('LOCAL')
+            return result
+
         # STEP 3: Check URL accessibility (if no DOI or DOI failed)
         if entry['url'] and result['status'] != 'verified':
             url_ok, url_status = self.verify_url(entry['url'])
@@ -346,10 +429,13 @@ class CitationVerifier:
         verified = [r for r in results if r['status'] == 'verified']
         url_verified = [r for r in results if r['status'] == 'url_verified']
         suspicious = [r for r in results if r['status'] == 'suspicious']
+        local = [r for r in results if r['status'] == 'local']
         unverified = [r for r in results if r['status'] in ['unverified', 'no_doi', 'unknown']]
+        checkable = len(results) - len(local)
 
         print(f'DOI Verified: {len(verified)}/{len(results)}')
         print(f'URL Verified: {len(url_verified)}/{len(results)}')
+        print(f'Local refs (not checked): {len(local)}/{len(results)}')
         print(f'Suspicious: {len(suspicious)}/{len(results)}')
         print(f'Unverified: {len(unverified)}/{len(results)}')
         print()
@@ -383,11 +469,15 @@ class CitationVerifier:
             print('STRICT MODE: Unverified citations found')
             return False
 
+        if checkable == 0:
+            print('PASS: 全部为本地 file:// 引用，无需联网核验')
+            return True
+
         if total_verified == 0:
             print('FAIL: No citation could be verified (0 verified)')
             return False
 
-        if total_verified / len(results) < 0.5:
+        if total_verified / checkable < 0.5:
             print('WARNING: Less than 50% citations verified')
             return True  # Pass with warning
         else:

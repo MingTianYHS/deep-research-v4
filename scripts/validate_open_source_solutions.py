@@ -84,7 +84,7 @@ def main() -> int:
     setup_console_encoding()
     parser = argparse.ArgumentParser(description="校验 开源方案.jsonl 与报告中的开源方案章节")
     parser.add_argument("--artifact", type=Path, required=True, help="开源方案.jsonl 路径")
-    parser.add_argument("--report", type=Path, help="研究报告 Markdown 路径（可选）")
+    parser.add_argument("--report", type=Path, help="研究报告 Markdown 路径（严格模式下必填，用于核对报告章节与仓库链接）")
     parser.add_argument("--strict", action="store_true", help="把警告也视为错误")
     args = parser.parse_args()
 
@@ -103,6 +103,9 @@ def main() -> int:
     if not rows and not errors:
         errors.append("产物文件没有任何记录")
 
+    if args.strict and not args.report:
+        errors.append("严格模式必须提供 --report：否则无法核对报告中的「开源方案全景」章节与仓库链接")
+
     urls = set()
     no_result_rows = [row for row in rows if row.get("status") == "no_qualifying_repositories"]
     if no_result_rows:
@@ -113,6 +116,10 @@ def main() -> int:
         for row in rows:
             errors.extend(validate_solution(row))
             url = row.get("canonical_url")
+            # 缺失/非字符串 URL 不得进入集合比较（否则 sorted/in 会抛 TypeError）
+            if not isinstance(url, str) or not url.strip():
+                errors.append(f"第 {row.get('_line', '?')} 行：canonical_url 缺失或不是字符串")
+                continue
             if url in urls:
                 errors.append(f"第 {row['_line']} 行：canonical_url 重复：{url}")
             urls.add(url)

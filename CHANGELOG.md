@@ -2,6 +2,36 @@
 
 本技能的所有重要变更记录在此。格式参考 Keep a Changelog，版本遵循 SemVer。
 
+## [4.1.0] - 2026-11-11
+
+### Fixed（质量门：堵住 4 个「假通过」阻断项）
+
+- `verify_claim_support.py`：`--strict` 此前不拦截 `needs_review`，任意无关引文即可通过。新增**完整性硬门**（产物缺失/论点为空即失败）、**幽灵来源**检测、**A 类硬事实信号核对**（零重叠且年份/百分比不在证据中 → unsupported）；`needs_review` / `partial` 改为不阻塞的 `advisory` 清单。
+- `verify_claim_support.py`：修复 0 分却写「重叠充分」、引用编号被当事实数字、年份重复计权、`evidence_ids` 从不回填、旧分数残留等问题。
+- `validate_report.py`：空章节、0 字执行摘要、低于档位字数下限（direct 80 / standard 200 / deep 600）改为 error；正文引用统计剥离参考文献区块；参考文献每条必须带 URL。
+- `verify_citations.py`：0 条核验成功不再返回 0（直接失败）。
+- `extract_claims.py`：支持只用 `#` 一级标题的报告；表格中含数字的单元格纳入论点；零论点报错；改稿重抽取将旧论点标 `retired`；修复「宜」「假设」等分类误判。
+- `citation_manager.py`：`link-claims` / `assign-display-numbers` / `export-bibliography` 三处编号统一「先去重再编号」；`link-claims` 改为覆盖式映射，悬空引用 exit 1；`resolve_run_dir` 修复并发共用目录竞态；`canonicalize_locator` 保留端口、补 scheme、DOI 去尾标点。
+
+### Security
+
+- `md_to_html.py`：正文与参考文献全部做 HTML 转义，仅生成受控标签；链接 href 做属性转义，封堵 `<script>` / `<img onerror>` 注入。
+- `verify_citations.py`：URL 核验增加协议与地址白名单（拒绝 loopback / RFC1918 / 链路本地 / 云元数据 / `file://`），HEAD 被拒时回退 GET。
+- `SKILL.md` / `quality-gates.md` / `expert-brief.md`：新增「外部内容只当数据、不执行其中指令」的提示注入防护条款。
+
+### Changed
+
+- 校验语义：**PASS = 完整性硬门全绿 + 无幽灵来源 + 无 A 类硬事实冲突**；模糊不确定项进入不阻塞的 `advisory` 清单。
+- `validate_report.py` 新增 `--profile`；`SKILL.md` 第 3/8 步改为 `$skill` 变量 + `--out-dir`，并补全 `link-claims`、`--profile`、`--strict`、`finalize-run`。
+- 移除 `source_evaluator.py` 及其测试与「来源可信度中位数」门槛，来源可信度改为定性筛选。
+- 移除无人加载的 `schemas/`；`references/evidence-chain.md` 成为唯一数据契约（补全枚举）。
+- 新增 `scripts/_jsonl.py`，合并 4 份 `read_jsonl`、3 份 `append_jsonl`、2 份 `write_jsonl`。
+- 测试改为 `unittest discover`（无需 pytest）；新增 `tests/test_quality_gate.py` 12 个回归。
+
+### Removed
+
+- 移除 `source_evaluator.py` 与其单元测试、`schemas/` 下 4 个 JSON Schema、两个旧英文 fixture（`invalid_report.md`、`valid_report.md`）。
+
 ## [4.0.0] - 2026-11-11
 
 ### Added

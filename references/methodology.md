@@ -86,7 +86,7 @@
 每批检索完成后立即登记来源并写入证据，不要只留在对话上下文：
 
 ```powershell
-# 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file（PowerShell 下最稳）
+> 推荐：把 JSON 对象写入 UTF-8 文件后使用 --json-file（PowerShell 下最稳）
 python scripts\citation_manager.py register-source --json-file "来源1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
 python scripts\evidence_store.py add --json-file "证据1.json" --dir "research\<主题>_研究_<YYYYMMDD>"
 ```
@@ -109,7 +109,7 @@ python scripts\evidence_store.py add --json-file "证据1.json" --dir "research\
 - 观点上同时覆盖支持者、批评者与中性分析。
 - 地域上不要只依赖单一国家来源。
 
-可信度处理：用 `scripts/source_evaluator.py` 给每个来源打 0–100 分；低于 40 分的来源只作线索，必须额外核验；高于 80 分的来源可支撑核心论点。
+可信度处理：按**定性筛选**判断来源——优先一手、官方、学术与具名机构来源；对营销稿、匿名聚合站、明显利益相关方保持警惕，并在报告中说明其对结论的影响。不做自动评分，也不设分数门槛（评分类工具已移除）。
 
 **产出**：`来源.jsonl`、`证据.jsonl`，以及一份覆盖清单（哪些子问题已覆盖、哪些仍有缺口）。
 
@@ -222,18 +222,19 @@ python scripts\evidence_store.py add --json-file "证据1.json" --dir "research\
 4. 编排参考文献：编号列表，每条 `[标题](URL)`，只列真实访问过的来源。
 5. 适用时附方法与验证说明，写明检索范围、来源构成与主要局限。
 
-**交付前校验**：
+**交付前校验**（完整清单以 `references/quality-gates.md:37-45` 为准）：
 
 ```powershell
 python scripts\extract_claims.py extract --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --dir "research\<主题>_研究_<YYYYMMDD>"
+python scripts\citation_manager.py link-claims --dir "research\<主题>_研究_<YYYYMMDD>"
 python scripts\verify_claim_support.py verify --dir "research\<主题>_研究_<YYYYMMDD>" --profile standard --strict
-python scripts\validate_report.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
-python scripts\verify_citations.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md"
+python scripts\validate_report.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --profile standard
+python scripts\verify_citations.py --report "research\<主题>_研究_<YYYYMMDD>\研究报告.md" --strict
 ```
 
-`--profile` 按实际路径取 `direct` / `standard` / `deep`。
+`--profile` 按实际路径取 `direct` / `standard` / `deep`，`validate_report.py` 需与 `verify_claim_support.py` 使用同一档位。
 
-适用时再运行 `validate_decision_guide.py` 与 `validate_open_source_solutions.py`。校验失败按 `references/quality-gates.md` 修复后重跑，最多 3 轮。
+适用时再运行 `validate_decision_guide.py` 与 `validate_open_source_solutions.py`。校验失败按 `references/quality-gates.md` 修复后重跑，最多 3 轮。**通过后运行 `citation_manager.py finalize-run --dir "[run目录]"`。**
 
 **产出**：`研究报告.md`、`论点.jsonl`、更新后的 `运行清单.json`；需要网页版时按 `references/html-generation.md` 生成 `报告.html`。
 

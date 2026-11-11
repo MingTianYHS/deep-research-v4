@@ -4,10 +4,10 @@
 
 ## 安装位置
 
-本目录应位于 DSH 技能根目录下：
+本目录应位于 DSH 技能根目录下（实际路径以安装位置为准）：
 
 ```
-C:\Users\Daybreak\.agents\skills\deep-research\
+<DSH 技能根目录>\deep-research\
 ├─ SKILL.md
 ├─ README.md
 ├─ CHANGELOG.md
@@ -26,25 +26,24 @@ C:\Users\Daybreak\.agents\skills\deep-research\
 ├─ scripts\
 │  ├─ _console.py
 │  ├─ _json_input.py
+│  ├─ _jsonl.py
 │  ├─ citation_manager.py
 │  ├─ evidence_store.py
 │  ├─ extract_claims.py
 │  ├─ verify_claim_support.py
 │  ├─ validate_report.py
 │  ├─ verify_citations.py
-│  ├─ source_evaluator.py
 │  ├─ validate_decision_guide.py
 │  ├─ validate_open_source_solutions.py
 │  ├─ md_to_html.py
 │  └─ verify_html.py
-├─ schemas\
 ├─ templates\
 └─ tests\
 ```
 
 ## 版本与来源
 
-- 版本：4.0.0（融合版）
+- 版本：4.1.0（质量门修订）
 - 基线：当前 DSH 版 `deep-research` 的「研究负责人」流程 + 备份版 `deep-research` v2.9.0 的工程化工具链
 - 许可证：MIT
 
@@ -55,9 +54,11 @@ C:\Users\Daybreak\.agents\skills\deep-research\
 ```powershell
 git log --oneline --decorate
 git switch main                    # 查看/回到升级前基线
-git reset --hard baseline-before-merge   # 完全回到基线
+git switch --detach baseline-before-merge   # 只读查看该基线（推荐）
 git switch merge-deep-research     # 回到融合版
 ```
+
+> `git reset --hard baseline-before-merge` 会**丢弃工作区所有未提交修改**。执行前先 `git status` 确认并备份；需要保留本地改动时用 `git reset --keep`。
 
 ## 核心特性
 
@@ -94,14 +95,15 @@ research/<主题>_研究_<YYYYMMDD>/
 
 ## 运行脚本
 
-以下命令均在技能根目录执行（或把 `scripts\` 换成技能目录下的绝对路径）。核心脚本只依赖 Python 3.9+ 标准库。DSH 中若 `python` 不在 PATH，使用：
+核心脚本只依赖 Python 3.9+ 标准库。**始终以用户工作目录为 cwd**，用 `--out-dir` 显式指定 run 目录，不要把产物写进技能安装目录。DSH 中若 `python` 不在 PATH，使用：
 
 ```powershell
+$skill = "<DSH 技能根目录>\deep-research"
 $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-& $py scripts\citation_manager.py init-run --query "研究问题" --mode standard
+& $py "$skill\scripts\citation_manager.py" init-run --query "研究问题" --mode <direct|standard|deep> --out-dir "<工作目录>\research\<主题>_研究_<YYYYMMDD>"
 ```
 
-常用命令见 `SKILL.md` 的「脚本」一节，完整数据契约见 `references/evidence-chain.md`。
+常用命令见 `references/evidence-chain.md` 第 3 节与 `SKILL.md`「执行流程」第 3、8 步，完整数据契约见 `references/evidence-chain.md`。
 
 ## 研究路径
 
@@ -118,7 +120,7 @@ $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python
 - 所有引用来源必须登记到 `来源.jsonl`。
 - A 类硬事实（数字、日期、价格、法规、规格、直接引语）必须有 `证据.jsonl` 原文记录。
 - 每条主要结论至少 2 个独立来源簇（标准）/ 3 个（深研）；同一通稿转载算一个簇。
-- 交付前运行 `extract_claims.py`、`verify_claim_support.py`、`validate_report.py`、`verify_citations.py`。
+- 交付前运行完整校验链：`extract_claims.py` → `citation_manager.py link-claims` → `verify_claim_support.py --profile <档位> --strict` → `validate_report.py --profile <档位>` → `verify_citations.py --strict`，通过后 `citation_manager.py finalize-run`。
 - 详细规则见 `references/quality-gates.md`。
 
 ## 约束与说明
@@ -131,15 +133,11 @@ $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python
 
 ## 测试
 
+测试为 `unittest` 风格，无需安装 pytest：
+
 ```powershell
 $py = "$env:DSH_HOME\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-& $py -m pytest tests -q
+& $py -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-若未安装 pytest，可创建临时虚拟环境：
-
-```powershell
-& $py -m venv .venv
-& .\.venv\Scripts\python.exe -m pip install pytest
-& .\.venv\Scripts\python.exe -m pytest tests -q
-```
+若已安装 pytest，`& $py -m pytest tests -q` 同样可用。

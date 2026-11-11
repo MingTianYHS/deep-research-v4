@@ -48,24 +48,10 @@ def compute_evidence_id(source_id: str, quote: str, locator: str | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# JSONL 读写辅助（全部显式 UTF-8）
+# JSONL 读写辅助（共享 _jsonl，统一 UTF-8 / 原子写 / 缺失语义）
 # ---------------------------------------------------------------------------
 
-def append_jsonl(path: str, obj: dict) -> None:
-    with open(path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + '\n')
-
-
-def read_jsonl(path: str) -> list[dict]:
-    rows = []
-    if not os.path.exists(path):
-        return rows
-    with open(path, encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
+from _jsonl import append_jsonl, read_jsonl  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
