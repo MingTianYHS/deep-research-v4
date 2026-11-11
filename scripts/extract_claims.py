@@ -248,7 +248,20 @@ def split_sentences(line: str) -> list[str]:
     sentences: list[str] = []
     for chunk in merged:
         sentences.extend(_EN_SENTENCE_SPLIT_RE.split(chunk))
-    return sentences
+
+    # 句末引用（「……。[1]」）会被切成独立碎片；把它并回前一句，
+    # 否则引用编号会丢失，link-claims 无法关联来源。
+    merged_sentences: list[str] = []
+    citation_only = re.compile(r'^\[\d+(?:\s*,\s*\d+)*\]$')
+    for sentence in sentences:
+        s = sentence.strip()
+        if not s:
+            continue
+        if citation_only.match(s) and merged_sentences:
+            merged_sentences[-1] = merged_sentences[-1].rstrip() + s
+        else:
+            merged_sentences.append(sentence)
+    return merged_sentences
 
 
 def extract_sentences(text: str) -> list[str]:
@@ -293,6 +306,13 @@ def extract_sentences(text: str) -> list[str]:
                 continue
             if _CITATION_ONLY_RE.match(sentence):
                 continue
+            # 「……。[1]下一句」中，[1] 属于前一句：移到前一句末尾
+            lead_cite = re.match(r'^(\[\d+(?:\s*,\s*\d+)*\])(.+)$', sentence)
+            if lead_cite and result:
+                result[-1] = result[-1].rstrip() + lead_cite.group(1)
+                sentence = lead_cite.group(2).strip()
+                if not sentence:
+                    continue
             if _visible_length(sentence) >= min_len:
                 result.append(sentence)
 
