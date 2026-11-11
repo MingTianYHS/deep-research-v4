@@ -8,12 +8,16 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List
 
 # The run-directory naming rule is owned by citation_manager; import it instead
 # of copying the pattern so the gate and the resolver cannot drift apart.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from citation_manager import check_run_dir  # noqa: E402
+from _console import setup_console_encoding  # noqa: E402
+
+# 各验证强度的最低总字数硬下限（低于即 error，防止空壳报告通过）
+MIN_WORDS = {'direct': 80, 'standard': 200, 'deep': 600}
 
 
 class ReportValidator:
@@ -51,11 +55,23 @@ class ReportValidator:
         latin = len(re.findall(r"[A-Za-z0-9][A-Za-z0-9'\-]*", text))
         return cjk + latin
 
-    def __init__(self, report_path: Path):
+    def __init__(self, report_path: Path, profile: str = 'standard'):
+        # 库方式调用（测试/其它脚本 import）也要有编码兜底，不能只靠 main()
+        setup_console_encoding()
         self.report_path = report_path
+        self.profile = profile if profile in MIN_WORDS else 'standard'
         self.content = self._read_report()
         self.errors: List[str] = []
         self.warnings: List[str] = []
+
+    def _body_without_bibliography(self) -> str:
+        """剥离参考文献区块，避免参考文献编号冒充正文引用。"""
+        return re.sub(
+            self._section_body_pattern("Bibliography"),
+            '',
+            self.content,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
 
     def _read_report(self) -> str:
         """Read report file"""
@@ -120,6 +136,10 @@ class ReportValidator:
         summary = match.group(1).strip()
         word_count = self._count_words(summary)
 
+        if word_count == 0:
+            self.errors.append("执行摘要为空（0 字）：空壳报告不得通过")
+            return False
+
         if word_count > 400:
             self.warnings.append(f"执行摘要偏长：{word_count} 字（建议 ≤400）")
 
@@ -161,12 +181,23 @@ class ReportValidator:
         if missing_recommended:
             self.warnings.append(f"缺少建议章节：{', '.join(missing_recommended)}")
 
+        # 必需章节不仅要有标题，还必须有正文（防「只有标题的空壳」）
+        empty_sections = []
+        for section in required:
+            m = re.search(self._section_body_pattern(section), self.content,
+                          re.DOTALL | re.IGNORECASE)
+            if m and not m.group(1).strip():
+                empty_sections.append(section)
+        if empty_sections:
+            self.errors.append(f"必需章节正文为空：{', '.join(empty_sections)}")
+            return False
+
         return True
 
     def _check_citations(self) -> bool:
-        """Check citation format and presence"""
-        # Find all citation references [1], [2], etc.
-        citations = re.findall(r'\[(\d+)\]', self.content)
+        """Check citation format and presence（只统计正文，不含参考文献）"""
+        body = self._body_without_bibliography()
+        citations = re.findall(r'\[(\d+)\]', body)
 
         if not citations:
             self.errors.append("报告中没有任何引用")
@@ -234,8 +265,19 @@ class ReportValidator:
                 self.errors.append(f"参考文献编号不连续：缺少 {missing}")
                 return False
 
-        # Find citations in text
-        text_citations = set(re.findall(r'\[(\d+)\]', self.content))
+        # 每条参考文献必须带可访问链接（无 URL 的条目不得通过）
+        no_url = []
+        for raw_line in bib_section.split('\n'):
+            line = raw_line.strip()
+            m = re.match(r'^\[(\d+)\]', line) or re.match(r'^(\d+)[.、)）]\s+', line)
+            if m and not re.search(r'https?://', line):
+                no_url.append(m.group(1))
+        if no_url:
+            self.errors.append(f"参考文献条目缺少 URL：{sorted(no_url, key=int)}")
+            return False
+
+        # Find citations in text（只算正文，不含参考文献自身）
+        text_citations = set(re.findall(r'\[(\d+)\]', self._body_without_bibliography()))
         bib_citations = set(bib_entries)
 
         # Check all citations have bibliography entries
@@ -290,8 +332,15 @@ class ReportValidator:
         return True
 
     def _check_word_count(self) -> bool:
-        """Check overall report length"""
+        """Check overall report length（低于档位硬下限即 error）"""
         word_count = self._count_words(self.content)
+        minimum = MIN_WORDS[self.profile]
+
+        if word_count < minimum:
+            self.errors.append(
+                f"报告过短：{word_count} 字，低于 {self.profile} 档硬下限 {minimum} 字（空壳不得通过）"
+            )
+            return False
 
         if word_count < 500:
             self.warnings.append(f"报告偏短：{word_count} 字（建议扩充）")
@@ -312,6 +361,8 @@ class ReportValidator:
 
         source_count = len(set(bib_entries))
 
+        # 来源数量是参考值而非 KPI（见 quality-gates）：只警告不硬失败，
+        # 避免误挡小型但完整的报告。空壳由空章节/0 字摘要/字数下限拦截。
         if source_count < 10:
             self.warnings.append(f"来源仅 {source_count} 个（建议 ≥10）")
 
@@ -410,6 +461,12 @@ def main():
         required=True,
         help='研究报告 Markdown 文件路径'
     )
+    parser.add_argument(
+        '--profile',
+        default='standard',
+        choices=['direct', 'standard', 'deep'],
+        help='验证强度：决定字数/来源数硬下限（默认 standard）'
+    )
 
     args = parser.parse_args()
 
@@ -419,7 +476,7 @@ def main():
         print(f"❌ 错误：找不到报告文件：{report_path}")
         sys.exit(1)
 
-    validator = ReportValidator(report_path)
+    validator = ReportValidator(report_path, profile=args.profile)
     passed = validator.validate()
 
     sys.exit(0 if passed else 1)

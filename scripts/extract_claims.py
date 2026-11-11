@@ -58,6 +58,15 @@ def append_jsonl(path: str, obj: dict) -> None:
         f.write(json.dumps(obj, ensure_ascii=False) + '\n')
 
 
+def write_jsonl(path: str, rows: list) -> None:
+    """原子重写：先写临时文件再替换，避免中断留下半截 JSONL。"""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+    os.replace(tmp, path)
+
+
 def read_jsonl(path: str) -> list[dict]:
     rows = []
     if not os.path.exists(path):
@@ -121,8 +130,8 @@ def classify_claim(text: str, section_id: str) -> str:
 
     # 建议类关键词
     recommendation_words = [
-        '应该', '应当', '建议', '推荐', '宜', '必须', '最好', '不妨',
-        '可采用', '应采取', '需要考虑', '需要评估',
+        '应该', '应当', '建议', '推荐', '必须', '最好', '不妨', '须',
+        '不宜', '宜采用', '宜选择', '可采用', '应采取', '需要考虑', '需要评估',
         'should', 'recommend', 'suggest', 'advise', 'consider',
     ]
     if any(w in lower for w in recommendation_words):
@@ -130,7 +139,7 @@ def classify_claim(text: str, section_id: str) -> str:
 
     # 推测类关键词
     speculation_words = [
-        '可能', '或许', '也许', '有望', '推测', '假设', '尚不确定',
+        '可能', '或许', '也许', '有望', '推测', '假设性', '若假设', '尚不确定',
         '未来可能', '预计将', '不排除', '大概会',
         'might', 'could potentially', 'it is possible', 'may eventually',
         'hypothetically', 'speculatively',
@@ -189,8 +198,25 @@ def classify_materiality(text: str, claim_type: str, section_id: str = '') -> st
     return 'B'
 
 
+def _h1_patterns() -> list:
+    """当报告只用一级标题（# ）时，把 ## 模式降级为 # 模式复用。"""
+    out = []
+    for pattern, id_or_fn in SECTION_PATTERNS:
+        src = pattern.pattern.replace(r'^##', r'^#', 1)
+        out.append((re.compile(src, pattern.flags), id_or_fn))
+    return out
+
+
 def parse_sections(markdown: str) -> list[tuple[str, str]]:
-    """把 Markdown 解析为 (section_id, content) 列表。"""
+    """把 Markdown 解析为 (section_id, content) 列表。
+
+    优先识别二级标题；若全文没有 ## 但存在多个 # 标题，则按一级标题切分，
+    避免「只用 # 的合法报告」被整体当作 preamble 跳过。
+    """
+    has_h2 = re.search(r'^##\s', markdown, re.M) is not None
+    h1_count = len(re.findall(r'^#\s', markdown, re.M))
+    patterns = SECTION_PATTERNS if (has_h2 or h1_count <= 1) else _h1_patterns()
+
     lines = markdown.split('\n')
     sections = []
     current_id = 'preamble'
@@ -198,7 +224,7 @@ def parse_sections(markdown: str) -> list[tuple[str, str]]:
 
     for line in lines:
         matched = False
-        for pattern, id_or_fn in SECTION_PATTERNS:
+        for pattern, id_or_fn in patterns:
             m = pattern.match(line)
             if m:
                 if current_lines:
@@ -260,8 +286,19 @@ def extract_sentences(text: str) -> list[str]:
         line = raw_line.strip()
         if not line:
             continue
-        if line.startswith('#') or line.startswith('|'):
+        if line.startswith('#'):
             continue
+        from_table = False
+        if line.startswith('|'):
+            # 表格分隔行（|---|---|）跳过
+            if re.fullmatch(r'[\s|:\-]+', line):
+                continue
+            # 表格单元格拼成一句，保留表内 A 类量化事实（不再整表跳过）
+            cells = [c.strip() for c in line.strip('|').split('|') if c.strip()]
+            line = '，'.join(cells)
+            if not re.search(r'\d', line):
+                continue  # 无数字的表头/描述行不作为硬事实候选
+            from_table = True
         if re.fullmatch(r'[-*_]{3,}', line):
             continue
         # 去掉无序/有序列表标记
@@ -271,13 +308,15 @@ def extract_sentences(text: str) -> list[str]:
         if not line:
             continue
 
+        # 表格单元格是浓缩事实，碎片阈值放宽；正文仍用 10 过滤噪声
+        min_len = 4 if from_table else 10
         for sentence in split_sentences(line):
             sentence = sentence.strip()
             if not sentence or sentence.startswith('#'):
                 continue
             if _CITATION_ONLY_RE.match(sentence):
                 continue
-            if _visible_length(sentence) >= 10:
+            if _visible_length(sentence) >= min_len:
                 result.append(sentence)
 
     return result
@@ -303,6 +342,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
     sections = parse_sections(markdown)
     added = 0
     skipped = 0
+    current_ids = set()
 
     skip_sections = {'preamble', 'bibliography', 'methodology'}
     for section_id, content in sections:
@@ -311,6 +351,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
         sentences = extract_sentences(content)
         for sentence in sentences:
             claim_id = compute_claim_id(section_id, sentence)
+            current_ids.add(claim_id)
             if claim_id in existing_ids:
                 skipped += 1
                 continue
@@ -329,7 +370,7 @@ def cmd_extract(args: argparse.Namespace) -> None:
                 'claim_type': claim_type,
                 'materiality': classify_materiality(sentence, claim_type, section_id),
                 'cited_source_ids': [],  # 由链接步骤填充
-                'evidence_ids': [],  # 由 verify_claim_support 填充
+                'evidence_ids': [],  # 由 verify_claim_support 回填命中的证据 ID
                 'support_status': 'unverified',
                 'extracted_at': datetime.now(timezone.utc).isoformat(),
                 '_citation_numbers': citation_nums,  # 临时字段，供链接步骤使用
@@ -338,10 +379,30 @@ def cmd_extract(args: argparse.Namespace) -> None:
             existing_ids.add(claim_id)
             added += 1
 
+    if added == 0 and skipped == 0:
+        print(json.dumps({
+            'status': 'error',
+            'error': '未抽取到任何论点：报告可能缺少可识别章节（## 或单一 # 体系）或正文为空',
+            'claims_added': 0,
+        }, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
+
+    #  retire：本次报告未出现的旧论点标记 retired，避免改稿后旧 A 类论点
+    #  永久残留并让 --strict 永远失败。
+    all_claims = read_jsonl(claims_path)
+    retired = 0
+    for c in all_claims:
+        if c.get('claim_id') not in current_ids and c.get('support_status') != 'retired':
+            c['support_status'] = 'retired'
+            retired += 1
+    if retired:
+        write_jsonl(claims_path, all_claims)
+
     print(json.dumps({
         'status': 'ok',
         'claims_added': added,
         'claims_skipped': skipped,
+        'claims_retired': retired,
         'total_claims': len(existing_ids),
     }, ensure_ascii=False))
 

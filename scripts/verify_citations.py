@@ -383,6 +383,10 @@ class CitationVerifier:
             print('STRICT MODE: Unverified citations found')
             return False
 
+        if total_verified == 0:
+            print('FAIL: No citation could be verified (0 verified)')
+            return False
+
         if total_verified / len(results) < 0.5:
             print('WARNING: Less than 50% citations verified')
             return True  # Pass with warning

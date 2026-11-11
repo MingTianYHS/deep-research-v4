@@ -20,7 +20,6 @@ import os
 import re
 import sys
 from collections import Counter
-from datetime import datetime, timezone
 
 
 ARTIFACT_CLAIMS = '论点.jsonl'
@@ -106,6 +105,50 @@ def extract_entities(text: str) -> set[str]:
     return ents - STOP_ENTITIES
 
 
+# 引用标记 [N] 或 [N, M]：打分前必须剥离，否则编号会被误当事实数字
+CITATION_RE = re.compile(r'\[(\d+(?:,\s*\d+)*)\]')
+
+# 百分比：跨翻译/改述稳定，可作为硬门信号
+PERCENT_RE = re.compile(r'\d+(?:\.\d+)?\s*[%％]')
+
+
+def strip_citations(text: str) -> str:
+    """去掉 [N] 引用标记，避免引用编号污染数字/年份提取。"""
+    return CITATION_RE.sub(' ', text)
+
+
+def extract_percents(text: str) -> set[str]:
+    """抽取百分比并归一化空白（30 % 与 30% 等价）。"""
+    return {re.sub(r'\s+', '', m) for m in PERCENT_RE.findall(text)}
+
+
+def hard_fact_missing_signals(claim_text: str, evidence_quotes: list[str]) -> list[str]:
+    """A 类硬事实的确定性核对：年份与百分比必须出现在所引证据中。
+
+    这两类信号跨翻译/改述稳定，误挡率低；绝对数值（亿/万/billion 换算）
+    不做硬门，交给软提示。返回缺失信号列表（空列表表示通过）。
+    """
+    clean = strip_citations(claim_text)
+    claim_years = extract_years(clean)
+    claim_percents = extract_percents(clean)
+    if not claim_years and not claim_percents:
+        return []
+
+    ev_years: set[str] = set()
+    ev_percents: set[str] = set()
+    for quote in evidence_quotes:
+        q = strip_citations(quote)
+        ev_years |= extract_years(q)
+        ev_percents |= extract_percents(q)
+
+    missing = []
+    for y in sorted(claim_years - ev_years):
+        missing.append(f'年份{y}')
+    for p in sorted(claim_percents - ev_percents):
+        missing.append(f'百分比{p}')
+    return missing
+
+
 def compute_support_score(
     claim_text: str,
     evidence_quotes: list[str],
@@ -120,20 +163,23 @@ def compute_support_score(
     if not evidence_quotes:
         return ('unsupported', 0.0, '无关联证据')
 
-    claim_tokens = extract_tokens(claim_text)
-    claim_numbers = extract_numbers(claim_text)
-    claim_years = extract_years(claim_text)
-    claim_entities = extract_entities(claim_text)
+    clean_claim = strip_citations(claim_text)
+    claim_tokens = extract_tokens(clean_claim)
+    claim_years = extract_years(clean_claim)
+    # 数字分量剔除纯年份，避免年份在 number 与 year 两个分量重复计权
+    claim_numbers = extract_numbers(clean_claim) - claim_years
+    claim_entities = extract_entities(clean_claim)
 
     thresholds = PROFILE_THRESHOLDS.get(profile, PROFILE_THRESHOLDS['standard'])
     best_score = 0.0
-    best_notes: list[str] = []
+    best_notes: list[str] = ['无词面重叠']
 
     for quote in evidence_quotes:
-        ev_tokens = extract_tokens(quote)
-        ev_numbers = extract_numbers(quote)
-        ev_years = extract_years(quote)
-        ev_entities = extract_entities(quote)
+        clean_quote = strip_citations(quote)
+        ev_tokens = extract_tokens(clean_quote)
+        ev_years = extract_years(clean_quote)
+        ev_numbers = extract_numbers(clean_quote) - ev_years
+        ev_entities = extract_entities(clean_quote)
 
         # 词面重叠（Jaccard-like：相对论点 token 的覆盖率）
         token_overlap = len(claim_tokens & ev_tokens) / len(claim_tokens) if claim_tokens else 0.0
@@ -150,7 +196,7 @@ def compute_support_score(
         total_weight = sum(weight for _, _, weight in components)
         score = sum(value * weight for _, value, weight in components) / total_weight
 
-        if score > best_score:
+        if score >= best_score:
             best_score = score
             best_notes = []
             if token_overlap < 0.30:
@@ -193,9 +239,30 @@ def cmd_verify(args: argparse.Namespace) -> None:
     evidence_path = os.path.join(args.dir, ARTIFACT_EVIDENCE)
     sources_path = os.path.join(args.dir, ARTIFACT_SOURCES)
 
+    # --- 完整性硬门：产物缺失/为空不得判通过 ---
+    missing = [p for p in (claims_path, evidence_path, sources_path) if not os.path.exists(p)]
+    if missing:
+        print(json.dumps({
+            'status': 'fail',
+            'error': '产物缺失，无法校验（请先运行 extract_claims / register-source / evidence_store add）',
+            'missing': [os.path.basename(p) for p in missing],
+        }, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
     claims = read_jsonl(claims_path)
     evidence = read_jsonl(evidence_path)
-    _sources = read_jsonl(sources_path)
+    sources = read_jsonl(sources_path)
+
+    if not claims:
+        print(json.dumps({
+            'status': 'fail',
+            'error': '论点.jsonl 为空：没有可校验的论点（抽取可能失败或报告无 ## 章节）',
+        }, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    # 来源/证据为空不算完整性失败：那会让「有论点但无证据」正确落到
+    # unsupported（质量信号），而不是把整次校验崩溃掉。
+    valid_source_ids = {s.get('source_id') for s in sources if s.get('source_id')}
 
     # 按 source_id 建证据索引
     ev_by_source: dict[str, list[str]] = {}
@@ -217,21 +284,45 @@ def cmd_verify(args: argparse.Namespace) -> None:
 
     verified = 0
     updated_claims = []
+    ghost_count = 0
+    hard_conflict_count = 0
+    advisory = []
 
     for claim in unique_claims:
+        # 已 retire 的旧论点不参与校验与计数
+        if claim.get('support_status') == 'retired':
+            updated_claims.append(claim)
+            continue
         claim_type = claim.get('claim_type', 'factual')
+        # 每次校验先清除旧分数/说明，避免残留误导
+        claim.pop('_support_score', None)
+        claim.pop('_support_notes', None)
+        claim.pop('_hard_fact_missing', None)
+        claim.pop('_ghost_sources', None)
 
         cited_ids = claim.get('cited_source_ids', [])
         evidence_ids = claim.get('evidence_ids', [])
 
+        # 幽灵来源：引用了不存在的 source_id
+        ghosts = [sid for sid in cited_ids if sid not in valid_source_ids]
+        if ghosts:
+            claim['_ghost_sources'] = ghosts
+            ghost_count += 1
+
         quotes = []
+        matched_eids = []
         for eid in evidence_ids:
             if eid in ev_by_id:
                 quotes.append(ev_by_id[eid].get('quote', ''))
-
+                matched_eids.append(eid)
         for sid in cited_ids:
             if sid in ev_by_source:
                 quotes.extend(ev_by_source[sid])
+        # 回填证据 ID 级关联（修正「evidence_ids 从不写入」）
+        if matched_eids:
+            claim['evidence_ids'] = matched_eids
+
+        is_hard = _is_hard_fact_claim(claim)
 
         if not quotes and not cited_ids and not evidence_ids:
             if claim_type == 'speculation':
@@ -239,12 +330,16 @@ def cmd_verify(args: argparse.Namespace) -> None:
             elif claim_type in ('synthesis', 'recommendation'):
                 claim['support_status'] = 'needs_review'  # 需要可追溯性
             elif claim.get('materiality') == 'B':
-                # B 类背景句允许不逐句引用，但应提示补充来源
                 claim['support_status'] = 'needs_review'
             else:
                 claim['support_status'] = 'unsupported'
-        elif not quotes:
-            claim['support_status'] = 'needs_review'
+        elif not quotes or ghosts:
+            # 有引用但无证据 / 引用幽灵来源：事实性论点判 unsupported（硬门）
+            if claim_type == 'factual':
+                claim['support_status'] = 'unsupported'
+                claim['_support_notes'] = '引用无对应证据或来源不存在'
+            else:
+                claim['support_status'] = 'needs_review'
         else:
             status, score, notes = compute_support_score(
                 claim['text'], quotes, profile=args.profile
@@ -252,6 +347,26 @@ def cmd_verify(args: argparse.Namespace) -> None:
             claim['support_status'] = status
             claim['_support_score'] = score
             claim['_support_notes'] = notes
+
+            # A 类硬事实确定性硬门：仅当「零词面重叠」且缺年份/百分比时判
+            # unsupported。有部分重叠时保留 partial/needs_review（避免把
+            # 「证据支持但没复述年份」误挡）。
+            if is_hard and score == 0.0:
+                missing_signals = hard_fact_missing_signals(claim['text'], quotes)
+                if missing_signals:
+                    claim['support_status'] = 'unsupported'
+                    claim['_hard_fact_missing'] = missing_signals
+                    claim['_support_notes'] = '硬事实信号未在证据出现：' + '、'.join(missing_signals)
+                    hard_conflict_count += 1
+
+        # 软提示清单（不阻塞）：needs_review / partial 的事实性论点
+        if claim.get('support_status') in ('needs_review', 'partial') and claim_type == 'factual':
+            advisory.append({
+                'section_id': claim.get('section_id', ''),
+                'text': claim.get('text', '')[:80],
+                'status': claim.get('support_status'),
+                'score': claim.get('_support_score'),
+            })
 
         verified += 1
         updated_claims.append(claim)
@@ -269,8 +384,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
     )
     total_factual = sum(1 for c in updated_claims if c.get('claim_type') == 'factual')
 
-    # 按验证强度决定严格模式失败条件：
-    # direct 只警告；standard 仅 A 类硬事实硬失败；deep 所有 factual 硬失败。
+    # 完整性硬门（产物缺失/无论点）已在前面 exit；幽灵来源与硬事实冲突
+    # 已逐条落到 unsupported，由 --strict 的 unsupported 计数拦截。
+    # 软性 needs_review/partial 只进 advisory 清单，不阻塞（保留 PASS 语义）。
     passed = True
     if args.strict:
         if args.profile == 'standard':
@@ -287,6 +403,10 @@ def cmd_verify(args: argparse.Namespace) -> None:
         'hard_factual_unsupported': hard_factual_unsupported,
         'total_factual': total_factual,
         'unsupported_rate': round(factual_unsupported / max(total_factual, 1), 3),
+        'ghost_sources': ghost_count,
+        'hard_fact_conflicts': hard_conflict_count,
+        'advisory_count': len(advisory),
+        'advisory': advisory[:20],
     }, indent=2, ensure_ascii=False))
 
     if not passed:
@@ -296,6 +416,9 @@ def cmd_verify(args: argparse.Namespace) -> None:
 def cmd_report(args: argparse.Namespace) -> None:
     """生成可读的论点支撑校验报告。"""
     claims_path = os.path.join(args.dir, ARTIFACT_CLAIMS)
+    if not os.path.exists(claims_path):
+        print(json.dumps({'error': '论点.jsonl 不存在，无法生成报告'}, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
     claims = read_jsonl(claims_path)
 
     seen = set()
@@ -305,6 +428,10 @@ def cmd_report(args: argparse.Namespace) -> None:
         if cid not in seen:
             seen.add(cid)
             unique.append(c)
+
+    if not unique:
+        print(json.dumps({'error': '论点.jsonl 为空，无法生成报告（不得视为全部有支撑）'}, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
 
     lines = ['# 论点支撑校验报告', '']
 

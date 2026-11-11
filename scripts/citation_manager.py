@@ -100,13 +100,17 @@ def resolve_run_dir(topic: str, base=None, date=None, create: bool = False) -> P
     if not create:
         return target
 
+    # 用 mkdir 的 FileExistsError 作为唯一判定（check-then-mkdir 有竞态，
+    # 并发调用会共用同一目录、把两次研究的证据静默混在一起）。
     candidate = target
     index = 2
-    while candidate.exists():
-        candidate = root / CONTAINER / f'{folder}_{index}'
-        index += 1
-    candidate.mkdir(parents=True, exist_ok=True)
-    return candidate
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            candidate = root / CONTAINER / f'{folder}_{index}'
+            index += 1
 
 
 def check_run_dir(path) -> list[str]:
@@ -135,10 +139,12 @@ def check_run_dir(path) -> list[str]:
 DOI_RE = re.compile(r'(?:https?://(?:dx\.)?doi\.org/|doi:)(10\.\d{4,}/\S+)', re.IGNORECASE)
 ARXIV_RE = re.compile(r'(?:https?://arxiv\.org/abs/|arxiv:)(\d{4}\.\d{4,}(?:v\d+)?)', re.IGNORECASE)
 
-# 只是追踪参数、不是内容标识的 URL 查询参数
+# 只是追踪参数、不是内容标识的 URL 查询参数。
+# 注意：不要删除 source/ref 这类可能承载内容语义的参数（?source=foo 与
+# ?source=bar 可能是不同来源），只删明确的追踪前缀。
 TRACKING_PARAMS = frozenset([
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-    'ref', 'source', 'fbclid', 'gclid', 'mc_cid', 'mc_eid',
+    'fbclid', 'gclid', 'mc_cid', 'mc_eid',
 ])
 
 
@@ -146,21 +152,26 @@ def canonicalize_locator(raw_url: str) -> str:
     """从原始 URL 或标识符字符串推导规范化 locator。
 
     优先级：DOI > arXiv > 规范化 URL。
+    保留非默认端口（避免 :8080 与 :80 被误合并）；无 scheme 时补 https://。
     """
-    # DOI
+    # DOI（剥离尾随标点，避免同一 DOI 因 ')' / '.' 被拆成两个来源）
     m = DOI_RE.search(raw_url)
     if m:
-        return f'doi:{m.group(1).rstrip(".")}'
+        return 'doi:' + m.group(1).rstrip('.,;:)]}')
 
     # arXiv
     m = ARXIV_RE.search(raw_url)
     if m:
         return f'arxiv:{m.group(1)}'
 
-    # 规范化 URL：小写 scheme 与 host，去掉 fragment 与追踪参数
+    # 无 scheme 的裸域名补 https://，避免 urlparse 产出畸形 locator
+    if '://' not in raw_url:
+        raw_url = 'https://' + raw_url
+
+    # 规范化 URL：小写 scheme 与 netloc（保留端口），去掉 fragment 与追踪参数
     parsed = urlparse(raw_url)
     scheme = (parsed.scheme or 'https').lower()
-    host = (parsed.hostname or '').lower()
+    netloc = (parsed.netloc or '').lower()
     path = parsed.path.rstrip('/')
     if parsed.query:
         pairs = []
@@ -171,7 +182,7 @@ def canonicalize_locator(raw_url: str) -> str:
         query = '&'.join(sorted(pairs))
     else:
         query = ''
-    return urlunparse((scheme, host, path, '', query, ''))
+    return urlunparse((scheme, netloc, path, '', query, ''))
 
 
 def compute_source_id(canonical_locator: str) -> str:
@@ -201,9 +212,12 @@ def read_jsonl(path: str) -> list[dict]:
 
 
 def write_jsonl(path: str, rows: list[dict]) -> None:
-    with open(path, 'w', encoding='utf-8') as f:
+    # 原子重写：先写临时文件再替换，避免中断/磁盘满留下半截 JSONL
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + '\n')
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -358,10 +372,15 @@ def cmd_assign_display_numbers(args: argparse.Namespace) -> None:
     sources = read_jsonl(sources_path)
 
     mapping = {}
-    for i, src in enumerate(sources, 1):
+    seen = set()
+    index = 0
+    for src in sources:
         sid = src['source_id']
-        if sid not in mapping:
-            mapping[sid] = i
+        if sid in seen:
+            continue
+        seen.add(sid)
+        index += 1
+        mapping[sid] = index
 
     print(json.dumps(mapping, indent=2, ensure_ascii=False))
 
@@ -377,14 +396,17 @@ def cmd_link_claims(args: argparse.Namespace) -> None:
     claims_path = os.path.join(args.dir, ARTIFACT_CLAIMS)
     claims = read_jsonl(claims_path)
 
-    display_to_source = {}
+    # 先按 source_id 去重再编号，保证与 export-bibliography / assign-display-numbers
+    # 三处编号一致（重复行不得消耗显示编号）。
+    unique_sources = []
     seen = set()
-    for index, src in enumerate(sources, 1):
+    for src in sources:
         sid = src.get('source_id', '')
         if not sid or sid in seen:
             continue
         seen.add(sid)
-        display_to_source[index] = sid
+        unique_sources.append(src)
+    display_to_source = {i: s['source_id'] for i, s in enumerate(unique_sources, 1)}
 
     linked = 0
     unresolved = {}
@@ -396,20 +418,23 @@ def cmd_link_claims(args: argparse.Namespace) -> None:
         missing = [n for n in numbers if n not in display_to_source]
         for n in missing:
             unresolved[str(n)] = unresolved.get(str(n), 0) + 1
-        existing = claim.get('cited_source_ids') or []
-        merged = list(dict.fromkeys(existing + resolved))
-        if merged != existing:
-            claim['cited_source_ids'] = merged
+        # 以当前正文引用为准覆盖（只增不减会残留改稿前的旧来源）
+        resolved = list(dict.fromkeys(resolved))
+        if resolved != (claim.get('cited_source_ids') or []):
+            claim['cited_source_ids'] = resolved
             linked += 1
 
     write_jsonl(claims_path, claims)
     print(json.dumps({
-        'status': 'ok',
+        'status': 'ok' if not unresolved else 'fail',
         'claims': len(claims),
         'linked': linked,
         'sources': len(display_to_source),
         'unresolved_citation_numbers': unresolved,
     }, ensure_ascii=False, indent=2))
+    if unresolved:
+        # 正文引用了不存在的显示编号 = 悬空引用，不得静默通过
+        sys.exit(1)
 
 
 def cmd_export_bibliography(args: argparse.Namespace) -> None:
