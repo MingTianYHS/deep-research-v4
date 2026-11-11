@@ -143,5 +143,43 @@ class WordCountTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
+class AdjacentCitationTests(unittest.TestCase):
+    """[1][2] 与 [1,2] 两种写法都必须识别全部来源编号。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def _first_claim_citations(self, marker):
+        md = (
+            "## 主要发现\n\n"
+            f"市场规模达到 1200 亿美元，同比增长 30%。{marker}\n\n"
+            "第二句话里没有数字也没有引用标记。\n"
+        )
+        p = os.path.join(self.tmp, "r.md")
+        Path(p).write_text(md, encoding="utf-8")
+        r = run_script("extract_claims", "extract", "--report", p, "--dir", self.tmp)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        claims = read_claims(self.tmp)
+        return {c["text"][:6]: c.get("_citation_numbers") for c in claims}, claims
+
+    def test_bracket_style_keeps_both_sources(self):
+        mapping, _ = self._first_claim_citations("[1][2]")
+        cited = [v for v in mapping.values() if v]
+        self.assertIn([1, 2], cited)
+
+    def test_comma_style_keeps_both_sources(self):
+        mapping, _ = self._first_claim_citations("[1,2]")
+        cited = [v for v in mapping.values() if v]
+        self.assertIn([1, 2], cited)
+
+    def test_plain_sentence_does_not_inherit_citation(self):
+        """普通无引用句子不得继承上一句的编号，避免凭空获得证据。"""
+        _, claims = self._first_claim_citations("[1][2]")
+        plain = [c for c in claims if "没有数字" in c["text"]]
+        self.assertTrue(plain)
+        self.assertEqual(plain[0].get("_citation_numbers"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

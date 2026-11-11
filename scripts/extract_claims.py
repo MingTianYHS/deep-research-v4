@@ -80,7 +80,7 @@ SECTION_PATTERNS = [
     (re.compile(r'^##\s+(.+)', re.I), lambda m: _fallback_section_id(m.group(1))),
 ]
 
-# 引用标记 [N] 或 [N, M]
+# 引用标记 [N]、[N, M]；相邻多个引用组 [1][2] 会由 finditer 分别匹配
 CITATION_RE = re.compile(r'\[(\d+(?:,\s*\d+)*)\]')
 
 # 中文句末标点：。！？；英文句末标点：.!?
@@ -282,8 +282,9 @@ def split_sentences(line: str) -> list[str]:
 
     # 句末引用（「……。[1]」）会被切成独立碎片；把它并回前一句，
     # 否则引用编号会丢失，link-claims 无法关联来源。
+    # 支持相邻多个引用组（「[1][2]」）与逗号写法（「[1,2]」）两种形式。
     merged_sentences: list[str] = []
-    citation_only = re.compile(r'^\[\d+(?:\s*,\s*\d+)*\]$')
+    citation_only = re.compile(r'^(?:\[\d+(?:\s*,\s*\d+)*\])+$')
     for sentence in sentences:
         s = sentence.strip()
         if not s:
@@ -385,8 +386,10 @@ def extract_sentences(text: str) -> list[str]:
                 continue
             if _CITATION_ONLY_RE.match(sentence):
                 continue
-            # 「……。[1]下一句」中，[1] 属于前一句：移到前一句末尾
-            lead_cite = re.match(r'^(\[\d+(?:\s*,\s*\d+)*\])(.+)$', sentence)
+            # 「……。[1]下一句」中，[1] 属于前一句：移到前一句末尾。
+            # 支持相邻多个引用组（「[1][2]下一句」）——整组都归前一句，
+            # 否则第二个来源编号会错挂到下一句或丢失。
+            lead_cite = re.match(r'^((?:\[\d+(?:\s*,\s*\d+)*\])+)(.+)$', sentence)
             if lead_cite and result:
                 result[-1] = result[-1].rstrip() + lead_cite.group(1)
                 sentence = lead_cite.group(2).strip()
@@ -446,8 +449,11 @@ def cmd_extract(args: argparse.Namespace) -> None:
                 continue
 
             claim_type = classify_claim(sentence, section_id)
-            # 表格行无自有引用时，继承本节最近一次引用编号
-            row_citations = citation_nums or list(inherited_citations)
+            # 只有表格数据行（由 _table_row_claim 生成「表头=值」格式）在缺少
+            # 自有引用时才继承本节最近一次引用编号；普通正文句子不继承，
+            # 避免「没有引用的背景句」凭空获得引用而被误判为 supported。
+            is_table_row = '=' in sentence
+            row_citations = citation_nums or (list(inherited_citations) if is_table_row else [])
             claim = {
                 'claim_id': claim_id,
                 'section_id': section_id,
