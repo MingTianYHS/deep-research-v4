@@ -2,6 +2,25 @@
 
 本技能的所有重要变更记录在此。格式参考 Keep a Changelog，版本遵循 SemVer。
 
+## [4.2.0] - 2026-11-11
+
+### Added
+
+- **HTML 报告正文引用可点击**：`md_to_html.py` 读取 run 目录 `来源.jsonl`，把正文 `[N]` 渲染为 `<a class="citation" href="来源URL" target="_blank">`，点一下直接打开来源页；无 URL 的编号保持纯文本。Markdown 版报告仍保持 `[N]` 纯编号，不插入长链接。
+- 模板中原本未使用的 `.citation` 样式正式启用。
+
+### Fixed（复审 A 批）
+
+- `verify_html.py` 重写为 `HTMLParser` 解析：逐个比对二级标题文本（不再只比数量）、拒绝 `script/iframe/object/embed` 与 `on*` 属性、拒绝 `javascript:/data:` 链接、参考文献条目数与 Markdown 逐条比对（空参考文献判 error）。
+- `verify_citations.py`：`entry.get('url','')` 在 `url=None` 时不再抛 `AttributeError`；单条核验异常被隔离，不再中断整轮。
+- `validate_report.py`：章节标题匹配改为 `^##(?!#)` 锚定，`### 引言` 不再冒充 `## 引言`；移除歧义别名「分析」（不再匹配「分析综合」）；支持带编号标题（`## 一、执行摘要`）。
+- `references/methodology.md`：删除已废弃的「平均可信度 >60/>70 分」评分表，改为定性停止条件。
+
+### Tests
+
+- 新增 `tests/test_review_batch_a.py`（11 个用例）：HTML 假章节/脚本/危险链接/空参考文献、H3 冒充 H2、编号标题、点击引用、无 URL 书目不崩溃。
+- 全套 138 个用例通过。
+
 ## [4.1.1] - 2026-11-11
 
 ### Fixed（复审后 4 个必须修项）

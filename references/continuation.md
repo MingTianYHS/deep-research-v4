@@ -26,7 +26,7 @@
 
 ```json
 {
-  "version": "4.1.1",
+  "version": "4.2.0",
   "report_id": "唯一标识",
   "file_path": "research\\<主题>_研究_<YYYYMMDD>\\研究报告.md",
   "query_type": "depth",

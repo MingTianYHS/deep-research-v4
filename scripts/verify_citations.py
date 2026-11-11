@@ -374,7 +374,7 @@ class CitationVerifier:
                 result['issues'].append(f"DOI resolution failed: {metadata.get('error', 'unknown')}")
 
         # STEP 2.5: 本地 file:// 引用——不联网核验，单列为 local（既不算通过也不导致失败）
-        if entry.get('url', '').startswith('file://'):
+        if (entry.get('url') or '').startswith('file://'):
             result['status'] = 'local'
             result['verification_methods'].append('LOCAL')
             return result
@@ -415,7 +415,17 @@ class CitationVerifier:
 
         results = []
         for entry in entries:
-            result = self.verify_entry(entry)
+            # 单条损坏不得中断整轮核验：记录为 unverified 并继续。
+            try:
+                result = self.verify_entry(entry)
+            except Exception as e:
+                result = {
+                    'num': entry.get('num', '?'),
+                    'status': 'unverified',
+                    'issues': [f'核验异常：{type(e).__name__}: {str(e)[:80]}'],
+                    'metadata': {},
+                    'verification_methods': [],
+                }
             results.append(result)
 
             # Rate limiting

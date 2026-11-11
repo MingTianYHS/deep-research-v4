@@ -30,6 +30,7 @@ python scripts\md_to_html.py "research\<主题>_研究_<YYYYMMDD>\研究报告.m
 
 - 读取 UTF-8 编码的 Markdown 报告。
 - 转换为正文 HTML 与参考文献 HTML。
+- **读取同目录 `来源.jsonl`，把正文里的 `[N]` 渲染成可点击来源链接**（点一下在新标签页打开来源 URL）；没有 URL 的编号保持纯文本。Markdown 版报告本身不插入链接，保持 `[N]` 纯编号。
 - 载入技能自带的 `templates\mckinsey_report_template.html`，填充全部占位符，并自动生成顶部指标条（章节数、来源数、正文字数）。
 - 在报告同目录写出 `报告.html`。
 

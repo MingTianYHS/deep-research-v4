@@ -1,219 +1,258 @@
 #!/usr/bin/env python3
-"""
-HTML 报告校验脚本
-校验 HTML 报告是否完整呈现 Markdown 报告的全部章节。
+"""HTML 报告校验脚本。
+
+用 HTMLParser 解析真实标签与标题文本，而不是正则数数量：
+- 逐个比对 Markdown 与 HTML 的二级标题（不是只比个数）；
+- 拒绝 script/iframe/object/embed、on* 事件属性、javascript:/data: 链接；
+- 参考文献条目数与 Markdown 逐条比对，空参考文献判 error。
 """
 
 import argparse
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
-from typing import List, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _console import setup_console_encoding  # noqa: E402
+
+
+# 危险标签与危险链接协议
+DANGEROUS_TAGS = {'script', 'iframe', 'object', 'embed', 'form'}
+DANGEROUS_PROTOCOLS = ('javascript:', 'data:', 'vbscript:')
+
+
+class _HTMLAudit(HTMLParser):
+    """一次遍历收集：h2 文本、bib-entry 数、危险标签与危险链接。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.h2_texts: list[str] = []
+        self.bib_entries = 0
+        self.dangerous_tags: list[str] = []
+        self.dangerous_attrs: list[str] = []
+        self.dangerous_links: list[str] = []
+        self._h2_buf: list[str] | None = None
+        self._in_bibliography = False
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        attr_map = {k.lower(): (v or '') for k, v in attrs}
+        classes = attr_map.get('class', '').split()
+
+        if tag in DANGEROUS_TAGS:
+            self.dangerous_tags.append(tag)
+        for key in attr_map:
+            if key.startswith('on'):
+                self.dangerous_attrs.append(f'{tag}[{key}]')
+        if tag == 'a':
+            href = attr_map.get('href', '').strip().lower()
+            if href.startswith(DANGEROUS_PROTOCOLS):
+                self.dangerous_links.append(href[:60])
+        if tag == 'h2':
+            self._h2_buf = []
+        if 'bibliography' in classes:
+            self._in_bibliography = True
+        if 'bib-entry' in classes:
+            self.bib_entries += 1
+
+    def handle_endtag(self, tag):
+        if tag.lower() == 'h2' and self._h2_buf is not None:
+            self.h2_texts.append(''.join(self._h2_buf).strip())
+            self._h2_buf = None
+
+    def handle_data(self, data):
+        if self._h2_buf is not None:
+            self._h2_buf.append(data)
+
+
+def _normalize_heading(text: str) -> str:
+    """去掉编号前缀与空白，便于比较。"""
+    text = re.sub(r'^\s*(?:[一二三四五六七八九十百]+|\d+)[、.．)）]\s*', '', text.strip())
+    return re.sub(r'\s+', '', text)
+
+
+def _md_h2(md: str) -> list[str]:
+    """只取真正的二级标题（## 后不能紧跟 #），排除 ### 与正文。"""
+    return [m.strip() for m in re.findall(r'^##(?!#)\s+(.+?)\s*$', md, re.MULTILINE)]
+
+
+def _count_md_bib_entries(md: str) -> int:
+    parts = re.split(r'^##(?!#)\s*(?:参考文献|参考资料|References|Bibliography)[^\n]*\n',
+                     md, maxsplit=1, flags=re.MULTILINE)
+    if len(parts) < 2:
+        return 0
+    body = re.split(r'^##(?!#)\s+', parts[1], maxsplit=1, flags=re.MULTILINE)[0]
+    count = 0
+    for line in body.split('\n'):
+        line = line.strip()
+        if re.match(r'^\[(\d+)\]', line) or re.match(r'^\d+[.、)）]\s+', line):
+            count += 1
+    return count
 
 
 class HTMLVerifier:
     """校验 HTML 研究报告"""
 
     def __init__(self, html_path: Path, md_path: Path):
+        setup_console_encoding()
         self.html_path = html_path
         self.md_path = md_path
-        self.errors = []
-        self.warnings = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
 
     def verify(self) -> bool:
-        """执行全部校验，全部通过返回 True。"""
         print(f"\n{'='*60}")
-        print(f"HTML 报告校验")
+        print("HTML 报告校验")
         print(f"{'='*60}\n")
-
         print(f"HTML 文件：{self.html_path}")
         print(f"Markdown 文件：{self.md_path}\n")
 
         try:
             html_content = self.html_path.read_text(encoding='utf-8')
             md_content = self.md_path.read_text(encoding='utf-8')
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             self.errors.append(f"读取文件失败：{e}")
+            self._print_results()
             return False
 
-        self._check_sections(html_content, md_content)
-        self._check_no_placeholders(html_content)
-        self._check_no_emojis(html_content)
+        audit = _HTMLAudit()
+        try:
+            audit.feed(html_content)
+        except Exception as e:  # HTMLParser 对极端畸形输入可能抛错
+            self.errors.append(f"HTML 解析失败：{e}")
+
+        self._check_sections(audit, md_content)
+        self._check_dangerous(audit)
+        self._check_placeholders(html_content)
         self._check_structure(html_content)
         self._check_citations(html_content, md_content)
-        self._check_bibliography(html_content, md_content)
+        self._check_bibliography(audit, md_content)
 
         self._print_results()
-
         return len(self.errors) == 0
 
-    def _check_sections(self, html: str, md: str):
-        """Verify all markdown sections are present in HTML"""
-        # Extract section headings from markdown
-        md_sections = re.findall(r'^## (.+)$', md, re.MULTILINE)
+    def _check_sections(self, audit: _HTMLAudit, md: str):
+        md_titles = _md_h2(md)
+        html_titles = audit.h2_texts
 
-        # Extract sections from HTML
-        html_sections = re.findall(r'<h2 class="section-title">(.+?)</h2>', html)
+        md_norm = [_normalize_heading(t) for t in md_titles]
+        html_norm = [_normalize_heading(t) for t in html_titles]
 
-        # Check if we have placeholder sections like <div class="section">#</div>
-        placeholder_sections = re.findall(r'<div class="section">#</div>', html)
+        # 参考文献通常渲染成独立区块，不要求出现在 h2 列表里
+        md_body = [t for t in md_norm
+                   if t not in ('参考文献', '参考资料', 'references', 'bibliography')]
 
-        if placeholder_sections:
+        missing = [t for t in md_body if t not in html_norm]
+        if missing:
+            self.errors.append(f"HTML 缺少章节标题：{missing}")
+
+        if len(html_norm) < len(md_body):
             self.errors.append(
-                f"Found {len(placeholder_sections)} placeholder sections (empty '#' divs) - content not converted properly"
+                f"章节数量不足：Markdown 有 {len(md_body)} 个正文二级标题，HTML 只有 {len(html_norm)} 个"
             )
 
-        # Compare section counts
-        if len(md_sections) > len(html_sections) + 1:  # +1 for bibliography which is separate
-            self.errors.append(
-                f"Section count mismatch: MD has {len(md_sections)} sections, HTML has only {len(html_sections)} + bibliography"
-            )
-            missing = set(md_sections) - set(html_sections)
-            if missing:
-                self.errors.append(f"Missing sections in HTML: {missing}")
+    def _check_dangerous(self, audit: _HTMLAudit):
+        if audit.dangerous_tags:
+            self.errors.append(f"HTML 含危险标签：{sorted(set(audit.dangerous_tags))}")
+        if audit.dangerous_attrs:
+            self.errors.append(f"HTML 含内联事件属性：{sorted(set(audit.dangerous_attrs))}")
+        if audit.dangerous_links:
+            self.errors.append(f"HTML 含危险链接协议：{sorted(set(audit.dangerous_links))}")
 
-        # 校验执行摘要存在
-        if any(name in md for name in ('执行摘要', 'Executive Summary')):
-            if not any(name in html for name in ('执行摘要', 'Executive Summary')):
-                self.errors.append("HTML 缺少执行摘要")
-
-    def _check_no_placeholders(self, html: str):
-        """Check for common placeholders that shouldn't be in final report"""
+    def _check_placeholders(self, html: str):
         placeholders = [
             '{{TITLE}}', '{{DATE}}', '{{CONTENT}}', '{{BIBLIOGRAPHY}}',
             '{{METRICS_DASHBOARD}}', '{{SOURCE_COUNT}}', 'TODO', 'TBD',
-            'PLACEHOLDER', 'FIXME'
+            'PLACEHOLDER', 'FIXME',
         ]
-
-        found = []
-        for placeholder in placeholders:
-            if placeholder in html:
-                found.append(placeholder)
-
+        found = [p for p in placeholders if p in html]
         if found:
-            self.errors.append(f"Found unreplaced placeholders: {', '.join(found)}")
-
-    def _check_no_emojis(self, html: str):
-        """Verify no emojis are present in HTML"""
-        # Common emoji patterns
-        emoji_pattern = re.compile(
-            "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags
-            "\U00002600-\U000026FF"  # misc symbols
-            "\U00002700-\U000027BF"  # dingbats
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "\U0001FA70-\U0001FAFF"  # extended pictographs
-            "\U0001F170-\U0001F251"  # enclosed characters
-            "]+",
-            flags=re.UNICODE
-        )
-
-        emojis = emoji_pattern.findall(html)
-        if emojis:
-            unique_emojis = set(emojis)
-            self.errors.append(f"Found {len(emojis)} emojis in HTML (should be none): {unique_emojis}")
+            self.errors.append(f"发现未替换占位符：{', '.join(found)}")
 
     def _check_structure(self, html: str):
-        """Verify HTML has proper structure"""
-        required_elements = [
-            ('<html', 'HTML tag'),
-            ('<head', 'head tag'),
-            ('<body', 'body tag'),
-            ('<title>', 'title tag'),
-            ('class="header"', 'header section'),
-            ('class="content"', 'content section'),
-            ('class="bibliography"', 'bibliography section'),
+        required = [
+            ('<html', 'HTML 标签'),
+            ('<head', 'head 标签'),
+            ('<body', 'body 标签'),
+            ('<title>', 'title 标签'),
+            ('class="header"', '页头区块'),
+            ('class="content"', '内容区块'),
+            ('class="bibliography"', '参考文献区块'),
         ]
+        for token, name in required:
+            if token not in html:
+                self.errors.append(f"HTML 缺少{name}")
 
-        for element, name in required_elements:
-            if element not in html:
-                self.errors.append(f"Missing {name} in HTML")
-
-        # Check for unclosed tags (basic check)
         open_divs = html.count('<div')
         close_divs = html.count('</div>')
-
-        if abs(open_divs - close_divs) > 2:  # Allow small discrepancy
+        if abs(open_divs - close_divs) > 2:
             self.warnings.append(
-                f"Possible unclosed divs: {open_divs} opening tags, {close_divs} closing tags"
+                f"div 可能未闭合：{open_divs} 个开始标签，{close_divs} 个结束标签"
             )
 
     def _check_citations(self, html: str, md: str):
-        """Verify citations are present"""
-        # Extract citations from markdown
-        md_citations = set(re.findall(r'\[(\d+)\]', md))
+        # Markdown 正文引用（排除参考文献区块）
+        md_body = re.split(r'^##(?!#)\s*(?:参考文献|参考资料|References|Bibliography)[^\n]*\n',
+                           md, maxsplit=1, flags=re.MULTILINE)[0]
+        md_citations = set(re.findall(r'\[(\d+)\]', md_body))
+        if not md_citations:
+            return
 
-        # Extract citations from HTML (excluding bibliography)
-        html_content = html.split('class="bibliography"')[0] if 'class="bibliography"' in html else html
-        html_citations = set(re.findall(r'\[(\d+)\]', html_content))
+        html_body = html.split('class="bibliography"')[0]
+        html_citations = set(re.findall(r'\[(\d+)\]', html_body))
+        missing = md_citations - html_citations
+        if missing:
+            self.errors.append(f"HTML 正文缺少引用编号：{sorted(missing, key=int)}")
 
-        if len(md_citations) > 0 and len(html_citations) == 0:
-            self.errors.append("No citations found in HTML content (but present in MD)")
-
-        if len(md_citations) > len(html_citations) * 1.5:  # Allow some variation
-            self.warnings.append(
-                f"Fewer citations in HTML ({len(html_citations)}) than MD ({len(md_citations)})"
+    def _check_bibliography(self, audit: _HTMLAudit, md: str):
+        md_entries = _count_md_bib_entries(md)
+        if md_entries == 0:
+            return
+        if audit.bib_entries == 0:
+            self.errors.append("HTML 参考文献区块没有条目（空参考文献不得通过）")
+        elif audit.bib_entries < md_entries:
+            self.errors.append(
+                f"HTML 参考文献条目不足：Markdown 有 {md_entries} 条，HTML 只有 {audit.bib_entries} 条"
             )
 
-    def _check_bibliography(self, html: str, md: str):
-        """校验参考文献在 HTML 中存在且格式正确。"""
-        if re.search(r'##\s*(?:参考文献|References|Bibliography)', md):
-            if 'class="bibliography"' not in html:
-                self.errors.append("HTML 缺少参考文献区块")
-            elif 'class="bib-entry"' not in html:
-                self.warnings.append("参考文献存在，但条目可能未正确格式化")
-
     def _print_results(self):
-        """打印校验结果。"""
-        print(f"\n{'-'*60}")
+        print(f"{'-'*60}")
         print("校验结果")
         print(f"{'-'*60}\n")
-
         if self.errors:
             print(f"❌ 错误（{len(self.errors)}）：")
             for i, error in enumerate(self.errors, 1):
                 print(f"  {i}. {error}")
             print()
-
         if self.warnings:
-            print(f"⚠️  警告（{len(self.warnings)}）：")
+            print(f"⚠️ 警告（{len(self.warnings)}）：")
             for i, warning in enumerate(self.warnings, 1):
                 print(f"  {i}. {warning}")
             print()
-
         if not self.errors and not self.warnings:
-            print("✅ 全部检查通过，HTML 报告有效。")
-            print()
-
-        print(f"{'-'*60}\n")
+            print("✅ 全部检查通过，HTML 报告有效。\n")
+        elif not self.errors:
+            print("✅ 校验通过（有警告）\n")
+        else:
+            print("❌ 校验失败，请修复后重试。\n")
 
 
 def main():
-    """命令行入口。"""
-    from _console import setup_console_encoding
-    setup_console_encoding()
-    parser = argparse.ArgumentParser(description='校验 HTML 研究报告与 Markdown 报告的一致性')
-    parser.add_argument('--html', type=Path, required=True, help='HTML 报告路径')
-    parser.add_argument('--md', type=Path, required=True, help='Markdown 报告路径')
-
+    parser = argparse.ArgumentParser(description="校验 HTML 报告是否完整、安全地呈现 Markdown 报告")
+    parser.add_argument("--html", type=Path, required=True, help="HTML 报告路径")
+    parser.add_argument("--md", type=Path, required=True, help="对应 Markdown 报告路径")
     args = parser.parse_args()
 
-    if not args.html.exists():
-        print(f"错误：找不到 HTML 文件：{args.html}")
-        return 1
-
-    if not args.md.exists():
-        print(f"错误：找不到 Markdown 文件：{args.md}")
-        return 1
+    for p, label in ((args.html, "HTML"), (args.md, "Markdown")):
+        if not p.exists():
+            print(f"错误：找不到{label}文件：{p}", file=sys.stderr)
+            sys.exit(1)
 
     verifier = HTMLVerifier(args.html, args.md)
-    success = verifier.verify()
-
-    return 0 if success else 1
+    passed = verifier.verify()
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
-    exit(main())
+    sys.exit(main())

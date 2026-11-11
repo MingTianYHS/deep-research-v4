@@ -19,6 +19,9 @@ from _console import setup_console_encoding  # noqa: E402
 # 各验证强度的最低总字数硬下限（低于即 error，防止空壳报告通过）
 MIN_WORDS = {'direct': 80, 'standard': 200, 'deep': 600}
 
+# 标题编号前缀（「一、」「1.」等）
+_NUM_PREFIX = r'(?:[一二三四五六七八九十百]+|\d+)[、.．)）]\s*'
+
 
 class ReportValidator:
     """校验研究报告质量"""
@@ -27,7 +30,7 @@ class ReportValidator:
     SECTION_ALIASES = {
         "Executive Summary": ["执行摘要", "摘要", "概要", "Executive Summary"],
         "Introduction": ["引言", "导言", "简介", "Introduction"],
-        "Main Analysis": ["主要发现", "正文", "分析", "Main Analysis", "Finding"],
+        "Main Analysis": ["主要发现", "正文", "Main Analysis", "Finding"],
         "Synthesis": ["分析综合", "综合分析", "综合", "Synthesis"],
         "Limitations": ["局限与说明", "局限性", "研究局限", "局限", "Limitations"],
         "Recommendations": ["建议", "推荐建议", "Recommendations"],
@@ -45,8 +48,15 @@ class ReportValidator:
 
     @classmethod
     def _section_body_pattern(cls, section: str) -> str:
-        """Pattern capturing a section body up to the next level-two heading."""
-        return rf'##\s*(?:{cls._alias_group(section)})[^\n]*\n(.*?)(?=\n##\s|\Z)'
+        """Pattern capturing a section body up to the next level-two heading.
+
+        锚定 `^##(?!#)`，避免 `### 子标题` 或正文里的 `## 字样` 被误当作章节。
+        调用方需同时传 re.MULTILINE | re.DOTALL。
+        """
+        return (
+            rf'^##(?!#)\s*(?:{_NUM_PREFIX})?(?:{cls._alias_group(section)})[^\n]*\n'
+            rf'(.*?)(?=\n##(?!#)\s|\Z)'
+        )
 
     @staticmethod
     def _count_words(text: str) -> int:
@@ -70,7 +80,7 @@ class ReportValidator:
             self._section_body_pattern("Bibliography"),
             '',
             self.content,
-            flags=re.DOTALL | re.IGNORECASE,
+            flags=re.DOTALL | re.MULTILINE | re.IGNORECASE,
         )
 
     def _read_report(self) -> str:
@@ -127,7 +137,7 @@ class ReportValidator:
     def _check_executive_summary(self) -> bool:
         """检查执行摘要存在，并给出字数提示。"""
         pattern = self._section_body_pattern("Executive Summary")
-        match = re.search(pattern, self.content, re.DOTALL | re.IGNORECASE)
+        match = re.search(pattern, self.content, re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
         if not match:
             self.errors.append("缺少「执行摘要」章节")
@@ -166,7 +176,13 @@ class ReportValidator:
 
         missing = []
         for section in required:
-            if not re.search(rf'##.*(?:{self._alias_group(section)})', self.content, re.IGNORECASE):
+            # 只匹配真正的二级标题（## 后不能紧跟 #），且标题文本必须
+            # 等于某个别名（可带编号前缀），避免 `### 引言` 或正文中的
+            # `## 引言` 字样冒充章节。
+            pattern = (
+                rf'^##(?!#)\s*(?:{_NUM_PREFIX})?(?:{self._alias_group(section)})[^\n]*$'
+            )
+            if not re.search(pattern, self.content, re.MULTILINE | re.IGNORECASE):
                 missing.append(section)
 
         if missing:
@@ -175,7 +191,10 @@ class ReportValidator:
 
         missing_recommended = []
         for section in recommended:
-            if not re.search(rf'##.*(?:{self._alias_group(section)})', self.content, re.IGNORECASE):
+            pattern = (
+                rf'^##(?!#)\s*(?:{_NUM_PREFIX})?(?:{self._alias_group(section)})[^\n]*$'
+            )
+            if not re.search(pattern, self.content, re.MULTILINE | re.IGNORECASE):
                 missing_recommended.append(section)
 
         if missing_recommended:
@@ -185,7 +204,7 @@ class ReportValidator:
         empty_sections = []
         for section in required:
             m = re.search(self._section_body_pattern(section), self.content,
-                          re.DOTALL | re.IGNORECASE)
+                          re.DOTALL | re.MULTILINE | re.IGNORECASE)
             if m and not m.group(1).strip():
                 empty_sections.append(section)
         if empty_sections:
@@ -223,7 +242,7 @@ class ReportValidator:
     def _check_bibliography(self) -> bool:
         """Check bibliography exists, matches citations, and has no truncation placeholders"""
         pattern = self._section_body_pattern("Bibliography")
-        match = re.search(pattern, self.content, re.DOTALL | re.IGNORECASE)
+        match = re.search(pattern, self.content, re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
         if not match:
             self.errors.append("缺少「参考文献」章节")
@@ -351,7 +370,7 @@ class ReportValidator:
     def _check_source_count(self) -> bool:
         """Check minimum source count"""
         pattern = self._section_body_pattern("Bibliography")
-        match = re.search(pattern, self.content, re.DOTALL | re.IGNORECASE)
+        match = re.search(pattern, self.content, re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
         if not match:
             return True  # Already caught in bibliography check

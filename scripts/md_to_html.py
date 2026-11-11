@@ -190,6 +190,67 @@ def count_sources_from_manifest_dir(run_dir: Path) -> int | None:
     return len(source_ids)
 
 
+def load_source_urls(run_dir: Path) -> dict[int, str]:
+    """读取 来源.jsonl，按去重登记顺序返回 {显示编号: raw_url}。
+
+    编号规则与 citation_manager.export-bibliography 一致（先按 source_id 去重，
+    再按登记顺序从 1 开始）。只有 http/https 链接才返回，用于正文 [N] 点击跳转。
+    """
+    sources_path = run_dir / '来源.jsonl'
+    if not sources_path.exists():
+        return {}
+    urls: dict[int, str] = {}
+    seen: set[str] = set()
+    index = 0
+    with open(sources_path, encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            sid = row.get('source_id')
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            index += 1
+            url = (row.get('raw_url') or '').strip()
+            if url.startswith(('http://', 'https://')):
+                urls[index] = url
+    return urls
+
+
+def linkify_citations(content_html: str, source_urls: dict[int, str]) -> str:
+    """把正文里的 [N] 变成可点击链接（点一下打开来源页）。
+
+    - 只处理不在已有 <a> 标签内的 [N]，避免嵌套链接；
+    - 没有 URL 的编号保持纯文本；
+    - href 做属性转义，防止注入。
+    """
+    if not source_urls:
+        return content_html
+
+    def repl(m: re.Match) -> str:
+        num = int(m.group(1))
+        url = source_urls.get(num)
+        if not url:
+            return m.group(0)
+        href = html_lib.escape(url, quote=True).replace('"', '%22')
+        return (
+            f'<a class="citation" href="{href}" target="_blank" '
+            f'rel="noreferrer">{m.group(0)}</a>'
+        )
+
+    # 先按已有 <a>...</a> 切片，只对非链接片段做替换
+    parts = re.split(r'(<a\b[^>]*>.*?</a>)', content_html, flags=re.DOTALL)
+    return ''.join(
+        part if part.startswith('<a') else re.sub(r'\[(\d+)\]', repl, part)
+        for part in parts
+    )
+
+
 def _convert_lists(html: str) -> str:
     """把 Markdown 无序/有序列表转换为 HTML 列表。"""
     lines = html.split('\n')
@@ -360,9 +421,15 @@ def render_report_html(
     template_text: str,
     report_date: str | None = None,
     source_count: int | None = None,
+    source_urls: dict[int, str] | None = None,
 ) -> str:
-    """把 Markdown 报告填入模板，返回完整 HTML 字符串。"""
+    """把 Markdown 报告填入模板，返回完整 HTML 字符串。
+
+    source_urls 非空时，正文里的 [N] 会变成可点击来源链接。
+    """
     content_html, bibliography_html = convert_markdown_to_html(markdown_text)
+    if source_urls:
+        content_html = linkify_citations(content_html, source_urls)
     title = html_lib.escape(_extract_title(markdown_text))
     if source_count is None:
         source_count = count_bibliography_entries(markdown_text)
@@ -425,13 +492,25 @@ def main() -> None:
     source_count = count_sources_from_manifest_dir(md_file.parent)
     if source_count is None:
         source_count = count_bibliography_entries(markdown_text)
-    rendered = render_report_html(markdown_text, template_text, args.date, source_count=source_count)
+
+    # 正文 [N] 点击跳转：从同目录 来源.jsonl 建立 编号→URL 映射
+    source_urls = load_source_urls(md_file.parent)
+
+    rendered = render_report_html(
+        markdown_text, template_text, args.date,
+        source_count=source_count, source_urls=source_urls,
+    )
 
     output_path = args.output or (md_file.parent / '报告.html')
     output_path.write_text(rendered, encoding='utf-8')
 
     print(
-        json.dumps({'status': 'ok', 'output': str(output_path), 'sources': source_count}, ensure_ascii=False)
+        json.dumps({
+            'status': 'ok',
+            'output': str(output_path),
+            'sources': source_count,
+            'linked_citations': len(source_urls),
+        }, ensure_ascii=False)
     )
 
 
