@@ -1,0 +1,29 @@
+name: 测试
+
+on:
+  push:
+    branches: [main, merge-deep-research]
+  pull_request:
+    branches: [main, merge-deep-research]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.12']
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 显示版本
+        run: python --version
+
+      - name: 运行单元测试
+        run: python -m unittest discover -s tests -p "test_*.py" -v
